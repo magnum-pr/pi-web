@@ -89,10 +89,10 @@ export interface ChatInputHandle {
   restoreSubmission: (text: string, images?: ChatDraftImage[], targetDraftKey?: string) => void;
 }
 
-const TOOL_PRESETS = ["off", "read-only", "default", "full"] as const;
+const TOOL_PRESETS = ["chat-only", "read-only", "default", "full"] as const;
 type ToolPresetLabel = typeof TOOL_PRESETS[number];
 const TOOL_PRESET_MAP: Record<ToolPresetLabel, ToolPreset> = {
-  off: "none",
+  "chat-only": "none",
   "read-only": "read-only",
   default: "default",
   full: "full",
@@ -1368,7 +1368,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (lvl === "auto" || !thinkingLevelMap) return lvl;
     return thinkingLevelMap[lvl] ?? lvl;
   })();
-  const toolPresetLabel = Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default";
+  const rawToolPresetLabel = Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default";
+  const toolPresetLabel = rawToolPresetLabel === "chat-only" ? t("chat.chatOnly") : rawToolPresetLabel;
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -2279,8 +2280,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <button
                   onClick={() => !isStreaming && setToolDropdownOpen((v) => !v)}
                   disabled={isStreaming}
-                   title={t("chat.changeToolPreset") + `: ${toolPresetLabel}`}
-                   aria-label={t("chat.changeToolPreset")}
+                  title={t("chat.changeToolPreset") + `: ${toolPresetLabel}`}
+                  aria-label={t("chat.changeToolPreset")}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
                     padding: isMobile ? "0 6px" : "8px 12px",
@@ -2324,7 +2325,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       const preset = TOOL_PRESET_MAP[lvl];
                       const isActive = (toolPreset ?? "default") === preset;
                       let desc: string;
-                      if (lvl === "off") desc = t("chat.noTools");
+                      if (lvl === "chat-only") desc = t("chat.chatOnly");
                       else if (lvl === "read-only") desc = t("chat.readOnlyTools", { count: 4 });
                       else if (lvl === "default") desc = t("chat.builtInTools", { count: 4 });
                       else desc = t("chat.allBuiltInTools");

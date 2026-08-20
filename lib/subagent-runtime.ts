@@ -26,6 +26,7 @@ import {
   type SubagentRunInfo,
 } from "./subagents";
 import type { SessionEntry } from "./types";
+import { buildSubagentPromptPlan } from "./subagent-prompt";
 
 interface HostSession {
   readonly inner: AgentSessionLike;
@@ -38,7 +39,10 @@ interface HostSession {
 
 export interface SubagentRuntimeDependencies {
   getSession(sessionId: string): HostSession | undefined;
-  registerSession(inner: AgentSessionLike): void;
+  registerSession(
+    inner: AgentSessionLike,
+    options?: { exactSystemPrompt?: string; chatOnly?: boolean },
+  ): void;
   reopenSession(sessionId: string, sessionFile: string): Promise<HostSession>;
   resolveSessionPath(sessionId: string): Promise<string | null>;
   invalidateSessionList(): void;
@@ -145,16 +149,20 @@ export function createSubagentController(
         throw new Error(`Invalid subagent thinking level: ${thinking}`);
       }
 
-      initTheme();
       const agentDir = getAgentDir();
       const parentModelRuntime = (parent.inner as unknown as { modelRuntime: ModelRuntime }).modelRuntime;
       const settingsManager = SettingsManager.create(parent.cwd, agentDir);
-      const appendSystemPrompt = [profile.systemPrompt];
-      if (inheritContext) {
-        appendSystemPrompt.push(
-          `The following is the active conversation context from the parent session. Use it only as background for the delegated task:\n${parentContextText(parent)}`,
-        );
-      }
+      const inheritedParentContext = inheritContext
+        ? `The following is the active conversation context from the parent session. Use it only as background for the delegated task:\n${parentContextText(parent)}`
+        : undefined;
+      const promptPlan = buildSubagentPromptPlan({
+        profileSystemPrompt: profile.systemPrompt,
+        tools: profile.tools,
+        task: request.task,
+        inheritedParentContext,
+      });
+      const { chatOnly, appendSystemPrompt, delegatedTask } = promptPlan;
+      if (!chatOnly) initTheme();
       const services = await createAgentSessionServices({
         cwd: parent.cwd,
         agentDir,
@@ -166,6 +174,12 @@ export function createSubagentController(
           noPromptTemplates: true,
           noThemes: true,
           noContextFiles: true,
+          ...(chatOnly
+            ? {
+                systemPrompt: " ",
+                systemPromptOverride: () => undefined,
+              }
+            : {}),
           appendSystemPrompt,
         },
       });
@@ -200,7 +214,12 @@ export function createSubagentController(
         ...(thinking ? { thinkingLevel: thinking as ThinkingLevel } : {}),
         tools: profile.tools,
       });
-      dependencies.registerSession(inner);
+      dependencies.registerSession(inner, {
+        ...(promptPlan.exactSystemPrompt !== undefined
+          ? { exactSystemPrompt: promptPlan.exactSystemPrompt }
+          : {}),
+        chatOnly,
+      });
 
       const initialRun: SubagentRunInfo = {
         sessionId: inner.sessionId,
@@ -249,7 +268,18 @@ export function createSubagentController(
       stored.completion = (async () => {
         let result: SubagentRunInfo;
         try {
-          await inner.prompt(request.task, { source: "rpc" });
+          await inner.prompt(delegatedTask, {
+            source: "rpc",
+            ...(chatOnly
+              ? {
+                  preflightResult: (success: boolean) => {
+                    if (success && inner.agent.state) {
+                      inner.agent.state.systemPrompt = profile.systemPrompt;
+                    }
+                  },
+                }
+              : {}),
+          });
           const text = inner.getLastAssistantText()?.trim();
           const aborted = stored.abortRequested && !maxTurnsReached;
           result = {

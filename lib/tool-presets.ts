@@ -22,10 +22,13 @@ export function isToolPreset(value: unknown): value is ToolPreset {
 
 export function getPresetFromTools(tools: ToolEntry[]): ToolPreset {
   const activeTools = tools.filter((t) => t.active);
-  if (activeTools.length === 0) return "none";
+  return getPresetFromToolNames(activeTools.map((tool) => tool.name));
+}
 
-  const active = activeTools
-    .map((t) => t.name)
+export function getPresetFromToolNames(toolNames: readonly string[]): ToolPreset {
+  if (toolNames.length === 0) return "none";
+
+  const active = toolNames
     .filter((name) => BUILTIN_TOOL_NAMES.has(name))
     .sort()
     .join(",");

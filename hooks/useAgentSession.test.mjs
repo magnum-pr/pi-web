@@ -116,7 +116,7 @@ test("new-session promotion rekeys drafts before publishing the real session", (
   assert.match(chatWindowSource, /draftKey=\{session\?\.id \?\? newSessionDraftKey \?\? undefined\}/);
 });
 
-test("fresh and dormant sessions restore the preferred tool preset while live sessions use their active tools", () => {
+test("fresh sessions use the preference while persisted and live sessions restore their selection", () => {
   const preferenceSource = source.slice(
     source.indexOf("  const setToolPresetState"),
     source.indexOf("  const scrollToBottom"),
@@ -135,20 +135,23 @@ test("fresh and dormant sessions restore the preferred tool preset while live se
     /const existingSessionId = session\?\.id;[\s\S]*?useLayoutEffect\(\(\) => \{\s*if \(!existingSessionId && \(!isNew \|\| sessionIdRef\.current\)\) return;\s*setToolPresetState\(getPreferredToolPreset\(\)\)/,
   );
   assert.match(source, /if \(agentState\?\.running\) \{\s*loadTools\(session\.id\)/);
+  assert.match(source, /d\.toolNames !== undefined \? getPresetFromToolNames\(d\.toolNames\) : "default"/);
   assert.match(changeSource, /setPreferredToolPreset\(preset\)/);
-  assert.match(changeSource, /sendAgentCommand\(sid, \{ type: "set_tools", toolNames \}\)/);
+  assert.match(changeSource, /\(sid, \{ type: "set_tools", toolNames \}\)/);
+  assert.match(changeSource, /sessionIdRef\.current = activeSessionId/);
   assert.doesNotMatch(loadToolsSource, /setPreferredToolPreset/);
 });
 
-test("existing-session prompts carry the displayed tool preset for idle runtime recovery", () => {
+test("existing-session prompts rely on the persisted tool selection", () => {
   const sendSource = source.slice(
     source.indexOf("  const handleSend = useCallback"),
     source.indexOf("  const executeBash = useCallback"),
   );
   const existingSessionPrompt = sendSource.slice(sendSource.indexOf("} else if (session)"));
 
-  assert.match(existingSessionPrompt, /type: "prompt",[\s\S]*?toolNames: getToolNamesForPreset\(toolPreset\)/);
-  assert.match(sendSource, /restoreSubmission, toolPreset\]\);/);
+  assert.match(existingSessionPrompt, /type: "prompt",\s*message,/);
+  assert.doesNotMatch(existingSessionPrompt, /toolNames:/);
+  assert.doesNotMatch(sendSource, /restoreSubmission, toolPreset\]\);/);
 });
 
 test("submission recovery updates live refs before a possible session rekey", () => {

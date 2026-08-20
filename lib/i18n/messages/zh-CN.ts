@@ -289,7 +289,7 @@ export const zhCNLocale: LocalePlugin = {
     "chat.shell": "Shell",
     "chat.outputLocal": "输出保留在本地",
     "chat.outputModel": "输出发送给模型",
-    "chat.noTools": "不使用工具",
+    "chat.chatOnly": "仅聊天",
     "chat.readOnlyTools": "{count} 个只读内置工具",
     "chat.builtInTools": "{count} 个内置工具",
     "chat.allBuiltInTools": "全部内置工具",
