@@ -97,7 +97,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     scope: "builtin",
   },
   {
-    name: "Explore",
+    name: "explore",
     displayName: "Explore",
     description: "Quickly inspect a codebase without modifying it",
     systemPrompt: "Explore the codebase to answer the delegated question. Do not modify files. Report concrete findings with file paths and relevant symbols.",
@@ -108,7 +108,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     scope: "builtin",
   },
   {
-    name: "Plan",
+    name: "plan",
     displayName: "Plan",
     description: "Design an implementation plan without modifying files",
     systemPrompt: "Produce an implementation-ready plan for the delegated task. Inspect the repository as needed, do not modify files, and call out dependencies, risks, and verification steps.",
