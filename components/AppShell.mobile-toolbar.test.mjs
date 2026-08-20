@@ -24,6 +24,13 @@ test("uses a compact narrow-mobile toolbar with a floating seven-action layer", 
   }
 });
 
+test("only renders branch toolbar controls for sessions with branches", () => {
+  assert.match(source, /const sessionHasBranches = hasSessionBranches\(branchTree\)/);
+  assert.match(source, /\{sessionHasBranches && \(mobile \? \(/);
+  assert.match(source, /\{isMobile && sessionHasBranches && \(/);
+  assert.match(source, /panel === "branches" \? null : panel/);
+});
+
 test("keeps covered statistics and file controls out of interaction and focus", () => {
   assert.match(source, /const covered = mobile && isNarrowMobile && mobileToolbarMoreOpen;/);
   assert.match(source, /disabled=\{!showChat \|\| covered\}[\s\S]*?tabIndex=\{covered \? -1 : undefined\}/);

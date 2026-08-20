@@ -6,7 +6,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { compressChain, selectTopLevelBranches, buildActivePath, hasBranch } = await jiti.import("./BranchNavigator.tsx");
+const { buildActivePath, compressChain, hasSessionBranches, selectTopLevelBranches } = await jiti.import("./BranchNavigator.tsx");
 
 const msg = (id, role, text) => ({ type: "message", id, parentId: null, timestamp: "t", message: { role, content: text } });
 const info = (id) => ({ type: "session_info", id, parentId: null, timestamp: "t", name: "x" });
@@ -64,6 +64,21 @@ test("selectTopLevelBranches returns children of the first branching node", () =
 test("selectTopLevelBranches returns empty for a linear session", () => {
   const root = node(msg("u1", "user", "第一问"), [node(msg("a1", "assistant", "答"))]);
   assert.deepEqual(selectTopLevelBranches([root]), []);
+});
+
+test("hasSessionBranches distinguishes linear sessions from branched sessions", () => {
+  const linear = node(msg("u1", "user", "第一问"), [node(msg("a1", "assistant", "答"))]);
+  const branched = node(msg("u1", "user", "第一问"), [
+    node(msg("a1", "assistant", "答"), [
+      node(msg("u2", "user", "分支一")),
+      node(msg("u2b", "user", "分支二")),
+    ]),
+  ]);
+
+  assert.equal(hasSessionBranches([]), false);
+  assert.equal(hasSessionBranches([linear]), false);
+  assert.equal(hasSessionBranches([branched]), true);
+  assert.equal(hasSessionBranches([linear, branched]), true);
 });
 
 test("selectTopLevelBranches works on preview-only server projections", () => {
@@ -130,21 +145,21 @@ test("buildActivePath finds the leaf on a 6000-deep linear chain without a stack
   assert.ok(path.has("e5999"));
 });
 
-test("hasBranch reports false for a linear chain (no branching) and true otherwise", () => {
-  assert.equal(hasBranch([linearTree(5000)]), false);
+test("hasSessionBranches reports false for a linear chain (no branching) and true otherwise", () => {
+  assert.equal(hasSessionBranches([linearTree(5000)]), false);
   const root = linearTree(3);
   root.children[0].children[0].children = [
     { entry: { type: "message", id: "b1", parentId: "e2", timestamp: "t", message: { role: "user", content: "x" } }, children: [] },
     { entry: { type: "message", id: "b2", parentId: "e2", timestamp: "t", message: { role: "user", content: "y" } }, children: [] },
   ];
-  assert.equal(hasBranch([root]), true);
-  assert.equal(hasBranch([root]), true);
+  assert.equal(hasSessionBranches([root]), true);
+  assert.equal(hasSessionBranches([root]), true);
 });
 
-test("hasBranch reports true for multiple root nodes (a branch from the first message)", () => {
+test("hasSessionBranches reports true for multiple root nodes (a branch from the first message)", () => {
   // Each root has a single child, so no node.children.length > 1 — only the
   // multiple-root shape makes this a branch.
   const r1 = { entry: { type: "message", id: "r1", parentId: null, timestamp: "t", message: { role: "user", content: "a" } }, children: [] };
   const r2 = { entry: { type: "message", id: "r2", parentId: null, timestamp: "t", message: { role: "user", content: "b" } }, children: [] };
-  assert.equal(hasBranch([r1, r2]), true);
+  assert.equal(hasSessionBranches([r1, r2]), true);
 });

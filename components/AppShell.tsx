@@ -10,7 +10,7 @@ import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
 import { SettingsPanel } from "./SettingsPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
-import { BranchNavigator } from "./BranchNavigator";
+import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { useTheme } from "@/hooks/useTheme";
@@ -195,6 +195,7 @@ export function AppShell() {
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
   const [branchActiveLeafId, setBranchActiveLeafId] = useState<string | null>(null);
   const branchLeafChangeFnRef = useRef<((leafId: string | null) => void) | null>(null);
+  const sessionHasBranches = hasSessionBranches(branchTree);
 
   const handleBranchDataChange = useCallback((tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => {
     setBranchTree(tree);
@@ -263,6 +264,12 @@ export function AppShell() {
   // Single active panel — only one dropdown open at a time
   const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "tools" | "session" | "language" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    if (!sessionHasBranches) {
+      setActiveTopPanel((panel) => panel === "branches" ? null : panel);
+    }
+  }, [sessionHasBranches]);
 
   const toggleTopPanel = useCallback((
     panel: "branches" | "system" | "tools" | "session" | "language",
@@ -590,6 +597,9 @@ export function AppShell() {
     setNewSessionCwd(null);
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
+    setBranchTree([]);
+    setBranchActiveLeafId(null);
+    branchLeafChangeFnRef.current = null;
     setSystemPrompt(null);
     setSystemTools(null);
     setSystemInfoLoading(false);
@@ -1276,7 +1286,7 @@ export function AppShell() {
             </button>
           );
         })()}
-        {mobile ? (
+        {sessionHasBranches && (mobile ? (
           <button
             type="button"
             onClick={() => toggleTopPanel("branches", true)}
@@ -1313,7 +1323,7 @@ export function AppShell() {
             onToggle={() => toggleTopPanel("branches")}
             hasSession
           />
-        )}
+        ))}
         <button
           ref={systemBtnRef}
           type="button"
@@ -1839,7 +1849,7 @@ export function AppShell() {
             </>
           )}
           {!isMobile && renderMainFileToggle(false)}
-          {isMobile && (
+          {isMobile && sessionHasBranches && (
             <BranchNavigator
               tree={branchTree}
               activeLeafId={branchActiveLeafId}
