@@ -19,14 +19,17 @@ import {
 import {
   readSubagentRun,
   resolveSubagentProfile,
+  SUBAGENT_CONTROL_TOOL_NAMES,
   SUBAGENT_META_TYPE,
   SUBAGENT_RESULT_TYPE,
+  withSubagentExtensionTools,
   type SubagentMetadata,
   type SubagentResultMetadata,
   type SubagentRunInfo,
 } from "./subagents";
 import type { SessionEntry } from "./types";
 import { buildSubagentPromptPlan } from "./subagent-prompt";
+import { projectTrustReloadOptions } from "./project-trust";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 
 interface HostSession {
@@ -162,6 +165,8 @@ export function createSubagentController(
       const promptPlan = buildSubagentPromptPlan({
         profileSystemPrompt: profile.systemPrompt,
         tools: profile.tools,
+        loadSkills: profile.loadSkills,
+        loadExtensions: profile.loadExtensions,
         task: request.task,
         inheritedParentContext,
       });
@@ -173,8 +178,8 @@ export function createSubagentController(
         modelRuntime: parentModelRuntime,
         settingsManager,
         resourceLoaderOptions: {
-          noExtensions: true,
-          noSkills: true,
+          noExtensions: !profile.loadExtensions,
+          noSkills: !profile.loadSkills,
           noPromptTemplates: true,
           noThemes: true,
           noContextFiles: true,
@@ -186,7 +191,15 @@ export function createSubagentController(
             : {}),
           appendSystemPrompt,
         },
+        ...((profile.loadExtensions || profile.loadSkills)
+          ? { resourceLoaderReloadOptions: projectTrustReloadOptions(parent.cwd, agentDir) }
+          : {}),
       });
+
+      const extensionToolNames = profile.loadExtensions
+        ? services.resourceLoader.getExtensions().extensions.flatMap((extension) => [...extension.tools.keys()])
+        : [];
+      const activeTools = withSubagentExtensionTools(profile.tools, extensionToolNames);
 
       const sessionManager = SessionManager.create(parent.cwd, undefined, { parentSession: parent.sessionFile });
       const createdAt = new Date().toISOString();
@@ -203,7 +216,9 @@ export function createSubagentController(
         resourceSnapshot: {
           version: 1,
           appendSystemPrompt: [...appendSystemPrompt],
-          tools: [...profile.tools],
+          tools: [...activeTools],
+          loadSkills: profile.loadSkills,
+          loadExtensions: profile.loadExtensions,
         },
       };
       sessionManager.appendCustomEntry(SUBAGENT_META_TYPE, metadata);
@@ -216,7 +231,8 @@ export function createSubagentController(
         sessionManager,
         model: requestedModel ?? parentModel,
         ...(thinking ? { thinkingLevel: thinking as ThinkingLevel } : {}),
-        tools: profile.tools,
+        tools: activeTools,
+        excludeTools: [...SUBAGENT_CONTROL_TOOL_NAMES],
       });
       dependencies.registerSession(inner, {
         ...(promptPlan.exactSystemPrompt !== undefined

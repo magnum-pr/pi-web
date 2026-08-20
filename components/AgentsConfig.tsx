@@ -47,6 +47,8 @@ const EMPTY_PROFILE: EditableProfile = {
   description: "",
   systemPrompt: "",
   tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+  loadSkills: false,
+  loadExtensions: false,
   inheritContext: false,
   runInBackground: false,
   enabled: true,
@@ -78,6 +80,8 @@ function editableProfile(profile: SubagentProfile): EditableProfile {
     description: profile.description,
     systemPrompt: profile.systemPrompt,
     tools: [...profile.tools],
+    loadSkills: profile.loadSkills,
+    loadExtensions: profile.loadExtensions,
     ...(profile.model ? { model: profile.model } : {}),
     ...(profile.thinking ? { thinking: profile.thinking } : {}),
     ...(profile.maxTurns ? { maxTurns: profile.maxTurns } : {}),
@@ -541,10 +545,17 @@ export function AgentsConfig({
                   </Field>
 
                   <Field label={t("agents.tools")}>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", padding: "9px 10px", border: "1px solid var(--border)", borderRadius: 5, background: disabled ? "var(--bg-panel)" : "transparent" }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px" }}>
                       {TOOL_OPTIONS.map((tool) => (
                         <Toggle key={tool} label={tool} disabled={disabled} checked={draft.tools.includes(tool)} onChange={(checked) => update("tools", checked ? [...draft.tools, tool] : draft.tools.filter((item) => item !== tool))} />
                       ))}
+                    </div>
+                  </Field>
+
+                  <Field label={t("agents.resources")}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 20px" }}>
+                      <Toggle label={t("agents.loadSkills")} disabled={disabled} checked={draft.loadSkills} onChange={(checked) => update("loadSkills", checked)} />
+                      <Toggle label={t("agents.loadExtensions")} disabled={disabled} checked={draft.loadExtensions} onChange={(checked) => update("loadExtensions", checked)} />
                     </div>
                   </Field>
 

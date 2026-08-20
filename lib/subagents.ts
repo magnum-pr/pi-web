@@ -11,6 +11,7 @@ import type { SessionEntry, SubagentSessionStatus } from "./types";
 
 export const SUBAGENT_META_TYPE = "pi-web:subagent";
 export const SUBAGENT_RESULT_TYPE = "pi-web:subagent-result";
+export const SUBAGENT_CONTROL_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent"] as const;
 
 export type SubagentStatus = SubagentSessionStatus;
 export type SubagentScope = "builtin" | "global" | "workspace" | "project";
@@ -22,6 +23,8 @@ export interface SubagentProfile {
   description: string;
   systemPrompt: string;
   tools: string[];
+  loadSkills: boolean;
+  loadExtensions: boolean;
   model?: string;
   thinking?: ThinkingLevel;
   maxTurns?: number;
@@ -49,11 +52,15 @@ export interface SubagentResourceSnapshot {
   version: 1;
   appendSystemPrompt: string[];
   tools: string[];
+  loadSkills: boolean;
+  loadExtensions: boolean;
 }
 
 export interface SubagentSessionResources {
   appendSystemPrompt: string[];
   tools: string[];
+  loadSkills: boolean;
+  loadExtensions: boolean;
 }
 
 export interface SubagentResultMetadata {
@@ -82,6 +89,7 @@ export interface SubagentRunInfo {
 
 const DEFAULT_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 const BUILTIN_TOOLS = new Set(DEFAULT_TOOLS);
+const SUBAGENT_CONTROL_TOOLS = new Set<string>(SUBAGENT_CONTROL_TOOL_NAMES);
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 const BUILTIN_PROFILES: SubagentProfile[] = [
@@ -91,6 +99,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description: "Handle a focused implementation or investigation task",
     systemPrompt: "Work autonomously on the delegated task. Keep the final answer concise and include important files, decisions, and remaining risks.",
     tools: DEFAULT_TOOLS,
+    loadSkills: false,
+    loadExtensions: false,
     inheritContext: false,
     runInBackground: false,
     enabled: true,
@@ -102,6 +112,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description: "Quickly inspect a codebase without modifying it",
     systemPrompt: "Explore the codebase to answer the delegated question. Do not modify files. Report concrete findings with file paths and relevant symbols.",
     tools: [...PRESET_READ_ONLY],
+    loadSkills: false,
+    loadExtensions: false,
     inheritContext: false,
     runInBackground: false,
     enabled: true,
@@ -113,6 +125,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description: "Design an implementation plan without modifying files",
     systemPrompt: "Produce an implementation-ready plan for the delegated task. Inspect the repository as needed, do not modify files, and call out dependencies, risks, and verification steps.",
     tools: [...PRESET_READ_ONLY],
+    loadSkills: false,
+    loadExtensions: false,
     inheritContext: false,
     runInBackground: false,
     enabled: true,
@@ -156,6 +170,8 @@ function parseProfileFile(filePath: string, scope: SubagentScope): SubagentProfi
       description: stringValue(data?.description) ?? name,
       systemPrompt: rest.trim(),
       tools: tools.filter((tool) => !disallowedTools.has(tool)),
+      loadSkills: booleanValue(data?.load_skills, false),
+      loadExtensions: booleanValue(data?.load_extensions, false),
       ...(stringValue(data?.model) ? { model: stringValue(data?.model) } : {}),
       ...(thinkingValue && THINKING_LEVELS.has(thinkingValue) ? { thinking: thinkingValue } : {}),
       ...(maxTurnsValue && maxTurnsValue > 0 ? { maxTurns: maxTurnsValue } : {}),
@@ -262,6 +278,8 @@ export function saveSubagentProfile(
   const description = profile.description.trim() || name;
   const systemPrompt = profile.systemPrompt.trim();
   const model = profile.model?.trim() || undefined;
+  const loadSkills = profile.loadSkills === true;
+  const loadExtensions = profile.loadExtensions === true;
   const dir = assertWritableProfileDirectory(cwd, scope);
   mkdirSync(dir, { recursive: true });
   if (scope === "project" && !isProjectProfilePathAllowed(cwd, dir)) {
@@ -272,6 +290,8 @@ export function saveSubagentProfile(
     description,
     display_name: displayName,
     tools: tools.length > 0 ? tools.join(", ") : "none",
+    load_skills: loadSkills,
+    load_extensions: loadExtensions,
     enabled: profile.enabled,
     inherit_context: profile.inheritContext,
     run_in_background: profile.runInBackground,
@@ -288,6 +308,8 @@ export function saveSubagentProfile(
     description,
     systemPrompt,
     tools,
+    loadSkills,
+    loadExtensions,
     ...(model ? { model } : { model: undefined }),
     ...(maxTurns ? { maxTurns } : { maxTurns: undefined }),
     scope,
@@ -334,20 +356,39 @@ export function readSubagentSessionResources(
   const data = subagentMetadataData(entries);
   if (!data) return null;
   const snapshot = data.resourceSnapshot;
+  const loadSkills = isRecord(snapshot) && snapshot.loadSkills === true;
+  const loadExtensions = isRecord(snapshot) && snapshot.loadExtensions === true;
   if (
     isRecord(snapshot)
     && snapshot.version === 1
     && Array.isArray(snapshot.appendSystemPrompt)
     && snapshot.appendSystemPrompt.every((item) => typeof item === "string")
     && Array.isArray(snapshot.tools)
-    && snapshot.tools.every((item) => typeof item === "string" && BUILTIN_TOOLS.has(item))
+    && snapshot.tools.every((item) =>
+      typeof item === "string"
+      && item.length > 0
+      && !SUBAGENT_CONTROL_TOOLS.has(item)
+      && (BUILTIN_TOOLS.has(item) || loadExtensions)
+    )
   ) {
     return {
       appendSystemPrompt: [...snapshot.appendSystemPrompt],
       tools: [...new Set(snapshot.tools)],
+      loadSkills,
+      loadExtensions,
     };
   }
   return null;
+}
+
+export function withSubagentExtensionTools(
+  profileTools: readonly string[],
+  extensionToolNames: Iterable<string>,
+): string[] {
+  return [...new Set([
+    ...profileTools,
+    ...[...extensionToolNames].filter((name) => !SUBAGENT_CONTROL_TOOLS.has(name)),
+  ])];
 }
 
 export function readSubagentRun(entries: readonly SessionEntry[], sessionId: string, sessionPath: string): SubagentRunInfo | null {

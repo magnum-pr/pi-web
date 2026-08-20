@@ -5,11 +5,15 @@ import {
   type InlineExtension,
   type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
-import type { SubagentProfile, SubagentRunInfo } from "./subagents";
+import {
+  SUBAGENT_CONTROL_TOOL_NAMES,
+  type SubagentProfile,
+  type SubagentRunInfo,
+} from "./subagents";
 
 export const HOST_SUBAGENT_EXTENSION_NAME = "pi-web-subagents";
 const HOST_SUBAGENT_EXTENSION_PATH = `<inline:${HOST_SUBAGENT_EXTENSION_NAME}>`;
-const SUBAGENT_TOOL_NAMES = new Set(["Agent", "get_subagent_result", "steer_subagent"]);
+const SUBAGENT_TOOL_NAMES = new Set<string>(SUBAGENT_CONTROL_TOOL_NAMES);
 const LEGACY_SUBAGENT_PACKAGE_NAME = "pi-subagents";
 
 export interface SubagentToolDetails {

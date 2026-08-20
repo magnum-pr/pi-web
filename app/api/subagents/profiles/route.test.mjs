@@ -30,6 +30,8 @@ function profile(overrides = {}) {
     description: "Used by route tests",
     systemPrompt: "Return a concise result.",
     tools: [],
+    loadSkills: true,
+    loadExtensions: true,
     inheritContext: false,
     runInBackground: true,
     enabled: true,
@@ -55,12 +57,20 @@ test("profiles route creates, lists, and deletes a project profile", async (t) =
   assert.equal(putResponse.status, 200);
   assert.equal(putBody.profile.scope, "project");
   assert.deepEqual(putBody.profile.tools, []);
-  assert.match(await readFile(join(cwd, ".pi", "agents", "api-test-agent.md"), "utf8"), /tools: none/);
+  assert.equal(putBody.profile.loadSkills, true);
+  assert.equal(putBody.profile.loadExtensions, true);
+  const source = await readFile(join(cwd, ".pi", "agents", "api-test-agent.md"), "utf8");
+  assert.match(source, /tools: none/);
+  assert.match(source, /load_skills: true/);
+  assert.match(source, /load_extensions: true/);
 
   const getResponse = await GET(new Request(`http://localhost/api/subagents/profiles?cwd=${encodeURIComponent(cwd)}`));
   const getBody = await getResponse.json();
   assert.equal(getResponse.status, 200);
-  assert.deepEqual(getBody.profiles.find((item) => item.name === "api-test-agent").tools, []);
+  const listedProfile = getBody.profiles.find((item) => item.name === "api-test-agent");
+  assert.deepEqual(listedProfile.tools, []);
+  assert.equal(listedProfile.loadSkills, true);
+  assert.equal(listedProfile.loadExtensions, true);
 
   const deleteResponse = await DELETE(jsonRequest("DELETE", { cwd, scope: "project", name: "api-test-agent" }));
   assert.equal(deleteResponse.status, 200);
@@ -111,6 +121,8 @@ test("profiles route keeps same-name global and project profiles independently e
   const toggledSources = (await response.json()).profiles.filter((item) => item.name === "api-test-agent");
   assert.equal(toggledSources.find((item) => item.scope === "global").enabled, false);
   assert.equal(toggledSources.find((item) => item.scope === "global").description, "Global profile");
+  assert.equal(toggledSources.find((item) => item.scope === "global").loadSkills, true);
+  assert.equal(toggledSources.find((item) => item.scope === "global").loadExtensions, true);
   assert.equal(toggledSources.find((item) => item.scope === "project").enabled, true);
 
   response = await DELETE(jsonRequest("DELETE", { cwd, scope: "project", name: "api-test-agent" }));

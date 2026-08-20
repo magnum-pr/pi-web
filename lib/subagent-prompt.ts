@@ -8,10 +8,12 @@ export interface SubagentPromptPlan {
 export function buildSubagentPromptPlan(options: {
   profileSystemPrompt: string;
   tools: readonly string[];
+  loadSkills?: boolean;
+  loadExtensions?: boolean;
   task: string;
   inheritedParentContext?: string;
 }): SubagentPromptPlan {
-  const chatOnly = options.tools.length === 0;
+  const chatOnly = options.tools.length === 0 && !options.loadSkills && !options.loadExtensions;
   const appendSystemPrompt = [options.profileSystemPrompt];
   if (options.inheritedParentContext && !chatOnly) {
     appendSystemPrompt.push(options.inheritedParentContext);

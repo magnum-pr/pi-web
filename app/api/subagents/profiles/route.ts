@@ -69,6 +69,8 @@ export async function PATCH(req: Request) {
       description: source.description,
       systemPrompt: source.systemPrompt,
       tools: source.tools,
+      loadSkills: source.loadSkills,
+      loadExtensions: source.loadExtensions,
       model: source.model,
       thinking: source.thinking,
       maxTurns: source.maxTurns,
