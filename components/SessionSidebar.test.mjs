@@ -30,6 +30,20 @@ test("exposes the polled running-session set to the shell", () => {
   assert.match(source, /onRunningSessionIdsChange\?\.\(runningSessionIds\)/);
 });
 
+test("subagent completion stays silent and never becomes unread", () => {
+  assert.match(source, /completionNotificationSuppressedSessionIds\?: string\[\]/);
+  assert.match(
+    source,
+    /completedWithNotifications = completedInBackground\.filter\([\s\S]*?!previousSuppressedCompletionSessionIdsRef\.current\.has\(id\)[\s\S]*?!knownSubagentIds\.has\(id\)/,
+  );
+  assert.match(source, /completedWithNotifications\.forEach\(\(id\) => next\.add\(id\)\)/);
+  assert.match(source, /if \(completedWithNotifications\.length > 0\) \{\s*onBackgroundTaskDone\?\.\(\)/);
+  assert.match(
+    source,
+    /filter\(\(session\) => session\.relation\?\.kind !== "subagent"\)[\s\S]*?unreadEligibleIds\.has\(id\)/,
+  );
+});
+
 test("includes project activity counts in accessible labels", () => {
   assert.match(
     source,

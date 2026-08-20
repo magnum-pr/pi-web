@@ -388,6 +388,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
   const previousRunningSessionIdsRef = useRef<Set<string>>(new Set());
+  const currentSuppressedCompletionSessionIdsRef = useRef<Set<string>>(new Set());
+  const previousSuppressedCompletionSessionIdsRef = useRef<Set<string>>(new Set());
   // Once polling has delivered a snapshot it is the source of truth for
   // running state; late /api/sessions responses must not overwrite it.
   const runningPollAuthoritativeRef = useRef(false);
@@ -402,18 +404,30 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
+      const data = await res.json() as {
+        sessions: SessionInfo[];
+        runningSessionIds?: string[];
+        completionNotificationSuppressedSessionIds?: string[];
+      };
       setAllSessions(data.sessions);
       // Treat the fetched running set as an initial fallback only. Once the
       // lightweight poll is live, a slow session-list fetch cannot overwrite it.
       if (!runningPollAuthoritativeRef.current) {
+        currentSuppressedCompletionSessionIdsRef.current = new Set(
+          data.completionNotificationSuppressedSessionIds ?? [],
+        );
         setRunningSessionIds(new Set(data.runningSessionIds ?? []));
       }
-      // Drop unread markers for sessions that no longer exist (e.g. deleted).
-      const existingIds = new Set(data.sessions.map((s) => s.id));
+      // Drop markers for deleted sessions and for subagents, whose completion
+      // is intentionally silent even if an older client marked them unread.
+      const unreadEligibleIds = new Set(
+        data.sessions
+          .filter((session) => session.relation?.kind !== "subagent")
+          .map((session) => session.id),
+      );
       setUnreadSessionIds((prev) => {
         if (prev.size === 0) return prev;
-        const next = new Set([...prev].filter((id) => existingIds.has(id)));
+        const next = new Set([...prev].filter((id) => unreadEligibleIds.has(id)));
         return next.size === prev.size ? prev : next;
       });
       setError(null);
@@ -475,9 +489,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           signal: current.signal,
         });
         if (!res.ok) return;
-        const data = await res.json() as { runningSessionIds?: string[] };
+        const data = await res.json() as {
+          runningSessionIds?: string[];
+          completionNotificationSuppressedSessionIds?: string[];
+        };
         if (stopped || controller !== current) return;
         runningPollAuthoritativeRef.current = true;
+        currentSuppressedCompletionSessionIdsRef.current = new Set(
+          data.completionNotificationSuppressedSessionIds ?? [],
+        );
         setRunningSessionIds(new Set(data.runningSessionIds ?? []));
       } catch {
         // Keep the last known state; the next visible-tab poll retries.
@@ -514,13 +534,21 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
     const completedInBackground = [...previous].filter((id) => !runningSessionIds.has(id) && id !== selectedSessionId);
+    const knownSubagentIds = new Set(
+      allSessions
+        .filter((session) => session.relation?.kind === "subagent")
+        .map((session) => session.id),
+    );
+    const completedWithNotifications = completedInBackground.filter(
+      (id) => !previousSuppressedCompletionSessionIdsRef.current.has(id) && !knownSubagentIds.has(id),
+    );
     const newlyRunning = [...runningSessionIds].filter((id) => !previous.has(id));
 
-    if (completedInBackground.length > 0 || newlyRunning.length > 0) {
+    if (completedWithNotifications.length > 0 || newlyRunning.length > 0) {
       setUnreadSessionIds((prev) => {
         const next = new Set(prev);
         runningSessionIds.forEach((id) => next.delete(id));
-        completedInBackground.forEach((id) => next.add(id));
+        completedWithNotifications.forEach((id) => next.add(id));
         return next;
       });
     }
@@ -530,11 +558,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (completedInBackground.length > 0 || hasUnlistedRunningSession) {
       loadSessions(false, true);
     }
-    if (completedInBackground.length > 0) {
+    if (completedWithNotifications.length > 0) {
       onBackgroundTaskDone?.();
     }
 
     previousRunningSessionIdsRef.current = runningSessionIds;
+    previousSuppressedCompletionSessionIdsRef.current = new Set(
+      [...runningSessionIds].filter(
+        (id) => currentSuppressedCompletionSessionIdsRef.current.has(id) || knownSubagentIds.has(id),
+      ),
+    );
   }, [runningSessionIds, selectedSessionId, allSessions, loadSessions, onBackgroundTaskDone]);
 
   useEffect(() => {

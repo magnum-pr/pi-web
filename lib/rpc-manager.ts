@@ -110,6 +110,7 @@ type AgentSessionWrapperOptions = {
   exactSystemPrompt?: () => string;
   chatOnly?: boolean;
   onAgentRunComplete?: AgentRunCompleteListener;
+  suppressCompletionNotifications?: boolean;
 };
 
 const RUNNING_STATE_EVENT_TYPES = new Set([
@@ -216,6 +217,7 @@ export class AgentSessionWrapper {
   private readonly exactSystemPrompt?: () => string;
   private readonly chatOnly: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
+  private readonly suppressCompletionNotifications: boolean;
   private unsubscribe: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
@@ -231,6 +233,7 @@ export class AgentSessionWrapper {
     this.exactSystemPrompt = options.exactSystemPrompt;
     this.chatOnly = options.chatOnly ?? false;
     this.onAgentRunComplete = options.onAgentRunComplete;
+    this.suppressCompletionNotifications = options.suppressCompletionNotifications ?? false;
     this.installExactSystemPromptContinuation();
     this.applyExactSystemPrompt();
   }
@@ -267,6 +270,10 @@ export class AgentSessionWrapper {
     return this.chatOnly;
   }
 
+  hasSuppressedCompletionNotifications(): boolean {
+    return this.suppressCompletionNotifications;
+  }
+
   start(): void {
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       if (event.type === "agent_start") this.agentRunNeedsCompletion = true;
@@ -285,6 +292,7 @@ export class AgentSessionWrapper {
   private notifyAgentRunCompleteIfIdle(): void {
     if (!this.agentRunNeedsCompletion || this.isRunning()) return;
     this.agentRunNeedsCompletion = false;
+    if (this.suppressCompletionNotifications) return;
     try {
       this.onAgentRunComplete?.(this.sessionId);
     } catch (error) {
@@ -1611,6 +1619,7 @@ const SUBAGENT_CONTROLLER = createSubagentController({
         ? { exactSystemPrompt: () => options.exactSystemPrompt! }
         : {}),
       chatOnly: options?.chatOnly,
+      suppressCompletionNotifications: true,
     });
     registerRpcWrapper(wrapper);
   },
@@ -1836,6 +1845,16 @@ export function getRunningRpcSessionIds(): string[] {
   return [...ids];
 }
 
+export function getCompletionNotificationSuppressedRpcSessionIds(): string[] {
+  const ids = new Set<string>();
+  for (const [sessionId, session] of getRegistry()) {
+    if (session.isRunning() && session.hasSuppressedCompletionNotifications()) {
+      ids.add(session.sessionId || sessionId);
+    }
+  }
+  return [...ids];
+}
+
 // ----------------------------------------------------------------------------
 // Running-status broadcaster
 //
@@ -2055,6 +2074,7 @@ export async function startRpcSession(
           console.error("[pi-web] failed to send completion push:", error instanceof Error ? error.message : error);
         });
       },
+      suppressCompletionNotifications: Boolean(subagentResources),
     });
     const realSessionId = inner.sessionId as string;
     registerRpcWrapper(wrapper);
