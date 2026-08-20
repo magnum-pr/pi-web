@@ -30,6 +30,11 @@ test("exposes the polled running-session set to the shell", () => {
   assert.match(source, /onRunningSessionIdsChange\?\.\(runningSessionIds\)/);
 });
 
+test("exposes the loaded session catalog to the shell", () => {
+  assert.match(source, /onSessionsChange\?: \(sessions: SessionInfo\[\]\) => void/);
+  assert.match(source, /onSessionsChange\?\.\(allSessions\)/);
+});
+
 test("subagent completion stays silent and never becomes unread", () => {
   assert.match(source, /completionNotificationSuppressedSessionIds\?: string\[\]/);
   assert.match(
@@ -89,6 +94,9 @@ test("does not expose disk-backed actions for transient sessions", () => {
   assert.match(sessionItemSource, /\{hovered && !session\.transient && \(/);
 });
 
-test("nests only marked subagent sessions and keeps forks at project root", () => {
-  assert.match(source, /import \{ buildSessionTree, type SessionTreeNode \} from "@\/lib\/session-tree"/);
+test("hides subagent rows and aggregates their state into the main session row", () => {
+  assert.match(source, /const sessionFamilies = listSessionFamilies\(filteredSessions\)/);
+  assert.match(source, /familySessions\.some\(\(session\) => session\.id === selectedSessionId\)/);
+  assert.match(source, /familySessions\.some\(\(session\) => runningSessionIds\.has\(session\.id\)\)/);
+  assert.doesNotMatch(source, /function SessionTreeItem/);
 });

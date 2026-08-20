@@ -1814,6 +1814,7 @@ export function getRpcSessionInfos(): SessionInfo[] {
           parentSessionId: subagent.parentSessionId,
           profile: subagent.profile,
           description: subagent.description,
+          status: session.isRunning() ? "running" as const : subagent.status,
         },
       } : {}),
       transient: !persisted,

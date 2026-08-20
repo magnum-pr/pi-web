@@ -12,16 +12,31 @@ test("keeps action icons inline in medium mobile sidebars", () => {
   assert.match(source, /\{isNarrowMobile && \([\s\S]*?data-mobile-toolbar-more="true"/);
 });
 
-test("uses a compact narrow-mobile toolbar with a floating seven-action layer", () => {
+test("uses a compact narrow-mobile toolbar with a floating action layer", () => {
   assert.match(source, /data-mobile-toolbar="true"[\s\S]*?flex: 1,[\s\S]*?minWidth: 0/);
   assert.match(
     source,
     /data-mobile-toolbar-actions="true"[\s\S]*?position: "absolute"[\s\S]*?right: 0,[\s\S]*?left: TOP_BAR_ICON_BUTTON_SIZE/,
   );
 
-  for (const action of ["history", "name", "branches", "system", "tools", "theme", "language"]) {
+  for (const action of ["history", "name", "agents", "branches", "system", "tools", "theme", "language"]) {
     assert.match(source, new RegExp(`data-mobile-toolbar-action=(?:\\{mobile \\? )?"${action}"`));
   }
+});
+
+test("only renders the Agents switcher when the active session family has subagents", () => {
+  assert.match(source, /const hasSubagentSessions = Boolean\(activeSessionFamily\?\.subagents\.length\)/);
+  assert.match(source, /\{hasSubagentSessions && \(\s*<button[\s\S]*?toggleTopPanel\("agents", mobile\)/);
+  assert.match(source, /activeTopPanel === "agents" && activeSessionFamily && selectedSession/);
+});
+
+test("keeps the Agents panel open while switching sessions and positions it at the left", () => {
+  assert.match(source, /const AGENT_PANEL_WIDTH = 420/);
+  assert.match(
+    source,
+    /if \(activeTopPanel === "agents"\)[\s\S]*?left: topBarRect\.left[\s\S]*?width: Math\.min\(AGENT_PANEL_WIDTH, topBarRect\.width\)/,
+  );
+  assert.match(source, /<AgentSessionPanel[\s\S]*?onSelectSession=\{handleSelectSession\}/);
 });
 
 test("only renders branch toolbar controls for sessions with branches", () => {

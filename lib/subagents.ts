@@ -7,12 +7,12 @@ import { parseFrontmatter } from "./frontmatter";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { isExistingPathWithinRoots } from "./path-security";
 import { PRESET_READ_ONLY } from "./tool-presets";
-import type { SessionEntry } from "./types";
+import type { SessionEntry, SubagentSessionStatus } from "./types";
 
 export const SUBAGENT_META_TYPE = "pi-web:subagent";
 export const SUBAGENT_RESULT_TYPE = "pi-web:subagent-result";
 
-export type SubagentStatus = "starting" | "running" | "completed" | "failed" | "aborted" | "interrupted";
+export type SubagentStatus = SubagentSessionStatus;
 export type SubagentScope = "builtin" | "global" | "workspace" | "project";
 export type SubagentWritableScope = Extract<SubagentScope, "global" | "project">;
 
