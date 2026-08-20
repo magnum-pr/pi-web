@@ -5,6 +5,10 @@ export interface SubagentProfilesResponse {
   profiles: SubagentProfile[];
 }
 
+export interface SubagentSettingsResponse {
+  enabled: boolean;
+}
+
 export interface SkillSearchResult {
   package: string;
   installs: string;

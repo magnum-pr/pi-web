@@ -19,6 +19,15 @@ test("uses the shared enabled status treatment", () => {
   assert.match(cssSource, /\.config-sidebar-text\.is-muted \{[\s\S]*?color: var\(--text-dim\)/);
 });
 
+test("offers a persisted built-in sub-agent switch with explicit session reload", () => {
+  assert.match(source, /fetch\("\/api\/subagents\/settings"/);
+  assert.match(source, /JSON\.stringify\(\{ enabled \}\)/);
+  assert.match(source, /<ConfigSwitch[\s\S]*?checked=\{builtInEnabled\}[\s\S]*?t\("agents\.builtInTitle"\)/);
+  assert.match(source, /sendAgentCommand\(sessionId, \{ type: "reload" \}\)/);
+  assert.match(source, /reloadNeeded && sessionId/);
+  assert.match(cssSource, /\.agents-feature-setting \{[\s\S]*?border-bottom: 1px solid var\(--border\)/);
+});
+
 test("marks profiles shadowed by a higher-precedence source", () => {
   assert.match(source, /isSubagentProfileOverridden\(profile, profiles\)/);
   assert.match(source, /overridden && <span className="agents-overridden-label">\{t\("agents\.overridden"\)\}<\/span>/);

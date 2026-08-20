@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import type { SubagentProfilesResponse } from "@/lib/api-types";
+import type { SubagentProfilesResponse, SubagentSettingsResponse } from "@/lib/api-types";
+import { sendAgentCommand } from "@/lib/agent-client";
 import type { ModelsData } from "@/lib/models-cache";
 import { isSubagentProfileOverridden } from "@/lib/subagent-profile-precedence";
 import type { SubagentProfile, SubagentScope, SubagentWritableScope } from "@/lib/subagents";
@@ -129,7 +130,19 @@ function Toggle({ checked, disabled, label, onChange }: { checked: boolean; disa
   );
 }
 
-export function AgentsConfig({ cwd, onClose, embedded = false }: { cwd: string; onClose: () => void; embedded?: boolean }) {
+export function AgentsConfig({
+  cwd,
+  sessionId = null,
+  onClose,
+  onReloaded,
+  embedded = false,
+}: {
+  cwd: string;
+  sessionId?: string | null;
+  onClose: () => void;
+  onReloaded?: () => void;
+  embedded?: boolean;
+}) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
   const [profiles, setProfiles] = useState<SubagentProfile[]>([]);
@@ -144,6 +157,12 @@ export function AgentsConfig({ cwd, onClose, embedded = false }: { cwd: string; 
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [builtInEnabled, setBuiltInEnabled] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [reloadNeeded, setReloadNeeded] = useState(false);
+  const [reloading, setReloading] = useState(false);
 
   const selected = useMemo(
     () => profiles.find((profile) => profileKey(profile) === selectedKey) ?? null,
@@ -186,6 +205,31 @@ export function AgentsConfig({ cwd, onClose, embedded = false }: { cwd: string; 
   useEffect(() => {
     void loadProfiles();
   }, [loadProfiles]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setSettingsLoading(true);
+    setSettingsError(null);
+    void (async () => {
+      try {
+        const response = await fetch("/api/subagents/settings", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const data = await response.json() as Partial<SubagentSettingsResponse> & { error?: string };
+        if (!response.ok || data.error || typeof data.enabled !== "boolean") {
+          throw new Error(data.error ?? `HTTP ${response.status}`);
+        }
+        setBuiltInEnabled(data.enabled);
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        setSettingsError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        if (!controller.signal.aborted) setSettingsLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (selectedKey) setLastSettingsSelection("agents", selectedKey, cwd);
@@ -336,8 +380,66 @@ export function AgentsConfig({ cwd, onClose, embedded = false }: { cwd: string; 
     }
   };
 
+  const toggleBuiltInSubagents = async (enabled: boolean) => {
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      const response = await fetch("/api/subagents/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await response.json() as Partial<SubagentSettingsResponse> & { error?: string };
+      if (!response.ok || data.error || typeof data.enabled !== "boolean") {
+        throw new Error(data.error ?? `HTTP ${response.status}`);
+      }
+      setBuiltInEnabled(data.enabled);
+      setReloadNeeded(Boolean(sessionId));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const reloadSession = async () => {
+    if (!sessionId) return;
+    setReloading(true);
+    setSettingsError(null);
+    try {
+      await sendAgentCommand(sessionId, { type: "reload" });
+      setReloadNeeded(false);
+      onReloaded?.();
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setReloading(false);
+    }
+  };
+
   return (
     <ConfigPanelShell embedded={embedded} title={t("common.agents")} subtitle={shortenPath(cwd)} closeLabel={t("agents.close")} onClose={onClose}>
+      <div className="agents-feature-setting">
+        <div className="agents-feature-copy">
+          <strong>{t("agents.builtInTitle")}</strong>
+          <span>{t("agents.builtInDescription")}</span>
+          {reloadNeeded && <span role="status" className="agents-feature-reload-notice">{t("agents.reloadRequired")}</span>}
+        </div>
+        <div className="agents-feature-actions">
+          {reloadNeeded && sessionId && (
+            <ConfigButton size="small" onClick={() => void reloadSession()} disabled={reloading || settingsSaving}>
+              {reloading ? t("agents.reloading") : t("agents.reloadSession")}
+            </ConfigButton>
+          )}
+          <ConfigSwitch
+            checked={builtInEnabled}
+            disabled={settingsLoading || reloading}
+            loading={settingsSaving}
+            label={t("agents.builtInTitle")}
+            onChange={(enabled) => void toggleBuiltInSubagents(enabled)}
+          />
+        </div>
+      </div>
       <ConfigSplitView>
         <ConfigSidebar>
           <ConfigSidebarList>
@@ -483,7 +585,7 @@ export function AgentsConfig({ cwd, onClose, embedded = false }: { cwd: string; 
           </ConfigDetailStack>
         </ConfigDetail>
       </ConfigSplitView>
-      <ConfigFooter status={error && <span role="alert" style={{ color: "#ef4444" }}>{error}</span>}>
+      <ConfigFooter status={(settingsError || error) && <span role="alert" style={{ color: "#ef4444" }}>{settingsError || error}</span>}>
         {editing && <ConfigButton variant="primary" onClick={() => void save()} disabled={saving || toggling || !draft.name.trim()}>{saving ? t("agents.saving") : t("agents.save")}</ConfigButton>}
       </ConfigFooter>
     </ConfigPanelShell>

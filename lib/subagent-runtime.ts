@@ -27,6 +27,7 @@ import {
 } from "./subagents";
 import type { SessionEntry } from "./types";
 import { buildSubagentPromptPlan } from "./subagent-prompt";
+import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 
 interface HostSession {
   readonly inner: AgentSessionLike;
@@ -47,6 +48,7 @@ export interface SubagentRuntimeDependencies {
   resolveSessionPath(sessionId: string): Promise<string | null>;
   invalidateSessionList(): void;
   notifyRunningChange(): void;
+  isBuiltInSubagentsEnabled?(): boolean;
 }
 
 export interface SubagentController {
@@ -127,6 +129,8 @@ export function createSubagentController(
   dependencies: SubagentRuntimeDependencies,
 ): SubagentController {
   async function start(request: StartSubagentRequest): Promise<SubagentExecution> {
+    const enabled = dependencies.isBuiltInSubagentsEnabled ?? isBuiltInSubagentsEnabled;
+    if (!enabled()) throw new Error("Pi Web built-in sub-agents are disabled");
     const parentSessionId = request.parentContext.sessionManager.getSessionId();
     const parent = dependencies.getSession(parentSessionId);
     if (!parent?.isAlive()) throw new Error("Parent session is no longer available");

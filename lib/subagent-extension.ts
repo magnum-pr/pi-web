@@ -52,6 +52,7 @@ export interface SubagentExtensionRuntime {
 }
 
 export type SubagentProfileProvider = () => readonly SubagentProfile[];
+export type SubagentEnabledProvider = () => boolean;
 
 function agentTypeDescription(profiles: readonly SubagentProfile[]): string {
   const available = profiles.filter((profile) => profile.enabled);
@@ -90,11 +91,13 @@ export function subagentFinalText(run: SubagentRunInfo): string {
 export function createSubagentExtension(
   runtime: SubagentExtensionRuntime,
   getProfiles: SubagentProfileProvider,
+  isEnabled: SubagentEnabledProvider = () => true,
 ): InlineExtension {
   return {
     name: HOST_SUBAGENT_EXTENSION_NAME,
     hidden: true,
     factory: (pi) => {
+      if (!isEnabled()) return;
       const profiles = getProfiles().filter((profile) => profile.enabled);
       const profileNames = profiles.map((profile) => profile.name);
       const availableTypes = profileNames.length > 0 ? profileNames.join(", ") : "none";
@@ -229,7 +232,7 @@ export function createSubagentExtension(
 /** Keep Pi Web's integrated implementation when the legacy package is loaded. */
 export function preferPiWebSubagentExtension(base: LoadExtensionsResult): LoadExtensionsResult {
   const host = base.extensions.find((extension) => extension.path === HOST_SUBAGENT_EXTENSION_PATH);
-  if (!host) return base;
+  if (!host?.tools.has("Agent")) return base;
   const legacyPaths = new Set(base.extensions
     .filter((extension) => extension.path !== HOST_SUBAGENT_EXTENSION_PATH)
     .filter((extension) => {
@@ -239,12 +242,20 @@ export function preferPiWebSubagentExtension(base: LoadExtensionsResult): LoadEx
       return sourcePackage === LEGACY_SUBAGENT_PACKAGE_NAME
         || pathSegments.some((segment) => segment === LEGACY_SUBAGENT_PACKAGE_NAME);
     })
-    .filter((extension) => [...SUBAGENT_TOOL_NAMES].every((name) => extension.tools.has(name)))
+    .filter((extension) => [...SUBAGENT_TOOL_NAMES].some((name) => extension.tools.has(name)))
     .map((extension) => extension.path));
   if (legacyPaths.size === 0) return base;
   return {
     ...base,
     extensions: base.extensions.filter((extension) => !legacyPaths.has(extension.path)),
-    errors: base.errors.filter((error) => !legacyPaths.has(error.path)),
+    errors: base.errors.filter((error) => {
+      if (legacyPaths.has(error.path)) return false;
+      if (error.path !== HOST_SUBAGENT_EXTENSION_PATH) return true;
+      return ![...legacyPaths].some((legacyPath) =>
+        [...SUBAGENT_TOOL_NAMES].some((name) =>
+          error.error === `Tool "${name}" conflicts with ${legacyPath}`
+        )
+      );
+    }),
   };
 }

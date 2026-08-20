@@ -37,6 +37,7 @@ import {
   readSubagentSessionResources,
 } from "./subagents";
 import { createSubagentController } from "./subagent-runtime";
+import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
 import {
   appendSessionToolSelection,
@@ -1628,6 +1629,7 @@ const SUBAGENT_CONTROLLER = createSubagentController({
   resolveSessionPath,
   invalidateSessionList: invalidateSessionListCache,
   notifyRunningChange,
+  isBuiltInSubagentsEnabled,
 });
 
 export function getSubagentRun(sessionId: string) {
@@ -2001,7 +2003,11 @@ export async function startRpcSession(
                 cwd: sessionCwd,
                 settings: settingsManager,
               }),
-              createSubagentExtension(SUBAGENT_CONTROLLER.extensionRuntime, () => listSubagentProfiles(sessionCwd)),
+              createSubagentExtension(
+                SUBAGENT_CONTROLLER.extensionRuntime,
+                () => listSubagentProfiles(sessionCwd),
+                isBuiltInSubagentsEnabled,
+              ),
             ],
             extensionsOverride: (base) => preferUserBashExtension(preferPiWebSubagentExtension(base)),
           },
