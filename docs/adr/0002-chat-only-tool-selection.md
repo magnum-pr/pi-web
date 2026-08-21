@@ -19,6 +19,10 @@ tools are activated alongside the profile's built-in tools except for Pi Web's
 reserved subagent-control tools, which remain excluded to prevent nested Agent
 dispatch.
 
+The host may resolve `input_files` before dispatch and include their UTF-8 text
+in the delegated user task. This is input preparation, not a subagent tool: it
+does not change the active tool list or the exact Chat-only system prompt.
+
 Pi's native session format does not persist the active tool selection. Normal
 sessions therefore append versioned `pi-web:tool-selection` custom entries:
 

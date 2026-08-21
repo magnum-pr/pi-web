@@ -10,6 +10,7 @@ import {
   type SubagentProfile,
   type SubagentRunInfo,
 } from "./subagents";
+import { MAX_SUBAGENT_INPUT_FILES } from "./subagent-input";
 
 export const HOST_SUBAGENT_EXTENSION_NAME = "pi-web-subagents";
 const HOST_SUBAGENT_EXTENSION_PATH = `<inline:${HOST_SUBAGENT_EXTENSION_NAME}>`;
@@ -33,6 +34,7 @@ export interface StartSubagentRequest {
   parentToolCallId: string;
   profile: string;
   task: string;
+  inputFiles?: string[];
   description: string;
   runInBackground?: boolean;
   model?: string;
@@ -119,6 +121,10 @@ export function createSubagentExtension(
         parameters: Type.Object({
           subagent_type: Type.Optional(Type.String({ description: `Configured agent profile. Available types: ${availableTypes}. Default: general-purpose.` })),
           prompt: Type.String({ description: "The complete task for the subagent." }),
+          input_files: Type.Optional(Type.Array(Type.String(), {
+            description: "UTF-8 text files under the session cwd to include with the task.",
+            maxItems: MAX_SUBAGENT_INPUT_FILES,
+          })),
           description: Type.String({ description: "Short activity label shown in the UI." }),
           run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete." })),
           model: Type.Optional(Type.String({ description: "Optional provider/modelId override." })),
@@ -133,6 +139,7 @@ export function createSubagentExtension(
               parentToolCallId: toolCallId,
               profile: params.subagent_type ?? "general-purpose",
               task: params.prompt,
+              ...(params.input_files ? { inputFiles: params.input_files } : {}),
               description: params.description,
               ...(params.run_in_background !== undefined ? { runInBackground: params.run_in_background } : {}),
               ...(params.model ? { model: params.model } : {}),
