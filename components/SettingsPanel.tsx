@@ -4,7 +4,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme, type ThemePreference } from "@/hooks/useTheme";
 import {
-  getLastSettingsSection,
   setLastSettingsSection,
   type SettingsSection,
 } from "@/lib/settings-navigation";
@@ -16,25 +15,26 @@ import { PluginsConfig } from "./PluginsConfig";
 interface Props {
   cwd: string | null;
   sessionId: string | null;
+  initialSection: SettingsSection;
   onClose: () => void;
   onPluginsReloaded: () => void;
 }
 
-function SectionIcon({ section }: { section: SettingsSection }) {
+export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: { section: SettingsSection; size?: number; strokeWidth?: number }) {
   const common = {
-    width: 16,
-    height: 16,
+    width: size,
+    height: size,
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",
-    strokeWidth: 1.8,
+    strokeWidth,
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
     "aria-hidden": true,
     className: "settings-section-icon",
   };
 
-  if (section === "general") return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" /></svg>;
+  if (section === "general") return <svg {...common}><path d="M20 7h-9M14 17H5" /><circle cx="7" cy="7" r="3" /><circle cx="17" cy="17" r="3" /></svg>;
   if (section === "models") return <svg {...common}><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 15h3M1 9h3M1 15h3" /></svg>;
   if (section === "skills") return <svg {...common}><path d="m12 2-10 5 10 5 10-5-10-5Z" /><path d="m2 12 10 5 10-5M2 17l10 5 10-5" /></svg>;
   if (section === "agents") return <svg {...common} className="settings-section-icon is-agent"><rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" /></svg>;
@@ -116,9 +116,9 @@ function GeneralSettings() {
   );
 }
 
-export function SettingsPanel({ cwd, sessionId, onClose, onPluginsReloaded }: Props) {
+export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onPluginsReloaded }: Props) {
   const { t } = useI18n();
-  const [section, setSection] = useState<SettingsSection>(() => getLastSettingsSection(cwd));
+  const [section, setSection] = useState<SettingsSection>(initialSection);
   const [mountedSections, setMountedSections] = useState<ReadonlySet<SettingsSection>>(
     () => new Set([section]),
   );
@@ -129,6 +129,8 @@ export function SettingsPanel({ cwd, sessionId, onClose, onPluginsReloaded }: Pr
     { id: "agents", label: t("common.agents"), requiresProject: true },
     { id: "plugins", label: t("common.plugins"), requiresProject: true },
   ];
+
+  useEffect(() => setLastSettingsSection(initialSection), [initialSection]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -200,7 +202,7 @@ export function SettingsPanel({ cwd, sessionId, onClose, onPluginsReloaded }: Pr
                   aria-current={selected ? "page" : undefined}
                   onClick={() => activateSection(item.id)}
                 >
-                  <SectionIcon section={item.id} />
+                  <SettingsSectionIcon section={item.id} />
                   <span>{item.label}</span>
                 </button>
               );
