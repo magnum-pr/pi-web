@@ -15,7 +15,7 @@
   },
   "sticky": {
     "enabled": true,
-    "lapseS": 20,
+    "lapseS": 30,
     "onsetDb": 6.0
   }
 }

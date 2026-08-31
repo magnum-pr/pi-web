@@ -46,7 +46,7 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   wakeWord: { phrase: "jarvis", threshold: 1e-20, ackEnabled: true, ack: "Yes?" },
   vad: { silenceMs: 3000, volumeDb: -28.0, calibrationMarginDb: 6.0 },
   recording: { maxDurationS: 45 },
-  sticky: { enabled: true, lapseS: 20, onsetDb: 6.0 },
+  sticky: { enabled: true, lapseS: 30, onsetDb: 6.0 },
 };
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
