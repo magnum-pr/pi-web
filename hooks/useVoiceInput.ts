@@ -2,15 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { encodeWav, resampleTo16k } from "@/lib/audio";
+import { DEFAULT_VOICE_CONFIG, resolveVoiceConfig, type VoiceConfig } from "@/lib/voice-config";
 
 const TARGET_RATE = 16000;
 const ROLLING_SECONDS = 2;
 const KWS_POLL_MS = 400;
-// Best-effort trailing trim; the keyword text strip is the reliable layer.
+const CONFIG_POLL_MS = 10_000; // hot-reload cadence for /api/voice-config
+// Best-effort trailing trim; the silence-stop already avoids dead air, this is a safety net.
 const TRAILING_TRIM_SAMPLES = Math.round(TARGET_RATE * 1.5);
+const AMBIENT_MAX_CHUNKS = 600; // ~51s of rolling noise-floor samples
+const AMBIENT_PERCENTILE = 0.2; // floor = 20th percentile (like whisper-vtt)
+const ONSET_HOLD_CHUNKS = 2; // consecutive speech chunks to debounce onset
 const STORAGE_KEY = "pi-voice-input-enabled";
 
-export type VoiceInputPhase = "idle" | "armed" | "recording" | "transcribing";
+export type VoiceInputPhase =
+  | "idle" // not listening (mic off)
+  | "armed" // listening for the wake word
+  | "sticky" // post-response follow-up window — speech onset triggers
+  | "recording" // capturing speech
+  | "transcribing" // POSTing to /api/transcribe
+  | "working"; // turn sent; mic quiet until sticky re-arms after read-aloud
 
 function concat(chunks: Float32Array[]): Float32Array {
   const total = chunks.reduce((n, c) => n + c.length, 0);
@@ -49,11 +60,29 @@ function stripKeyword(text: string): string {
     .trim();
 }
 
+/** RMS of a mono chunk in dB, floored at -60. */
+function rmsDb(samples: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const v = samples[i];
+    sum += v * v;
+  }
+  const rms = Math.sqrt(sum / samples.length);
+  return rms > 1e-6 ? 20 * Math.log10(rms) : -60;
+}
+
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return -60;
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * sorted.length)));
+  return sorted[idx];
+}
+
 /**
- * Continuous voice input: listen for "jarvis" (wake), record freely (silence
- * tolerated), listen for "finalize" (stop), then transcribe and auto-send.
+ * Continuous voice input: wake word ("jarvis") arms recording; silence
+ * auto-stops and auto-sends (no "finalize" required); after the agent's
+ * spoken reply finishes, a sticky onset window re-arms for follow-ups.
  */
-export function useVoiceInput(onSend: (text: string) => void) {
+export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
   const [enabled, setEnabledState] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(STORAGE_KEY) === "true";
@@ -62,11 +91,39 @@ export function useVoiceInput(onSend: (text: string) => void) {
   const [lastDetected, setLastDetected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const enabledRef = useRef(enabled);
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
+
   const phaseRef = useRef<VoiceInputPhase>("idle");
   const sampleRateRef = useRef<number>(TARGET_RATE);
   const rollingRef = useRef<Float32Array[]>([]);
   const recordingRef = useRef<Float32Array[]>([]);
   const kwsInFlightRef = useRef(false);
+  const configRef = useRef<VoiceConfig>(DEFAULT_VOICE_CONFIG);
+  const ctxRef = useRef<AudioContext | null>(null);
+
+  // Amplitude / VAD / sticky state.
+  const ambientRef = useRef<number[]>([]);
+  const floorDbRef = useRef<number | null>(null);
+  const lastSpeechAtRef = useRef<number | null>(null);
+  const recordingStartAtRef = useRef<number | null>(null);
+  const onsetCountRef = useRef(0);
+  const ackPlayingRef = useRef(false);
+  const stickyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const gotoPhase = useCallback((next: VoiceInputPhase) => {
+    phaseRef.current = next;
+    setPhase(next);
+  }, []);
+
+  const clearStickyTimer = useCallback(() => {
+    if (stickyTimerRef.current) {
+      clearTimeout(stickyTimerRef.current);
+      stickyTimerRef.current = null;
+    }
+  }, []);
 
   const setEnabled = useCallback((next: boolean) => {
     setEnabledState(next);
@@ -75,21 +132,64 @@ export function useVoiceInput(onSend: (text: string) => void) {
     } catch {
       // ignore storage errors
     }
+    if (!next) {
+      clearStickyTimer();
+      recordingRef.current = [];
+      gotoPhase("idle");
+    }
+  }, [clearStickyTimer, gotoPhase]);
+
+  // Play the short "Yes?" wake acknowledgment (proves the mic heard "jarvis").
+  const playAck = useCallback(async () => {
+    const cfg = configRef.current;
+    if (!cfg.wakeWord.ackEnabled) return;
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    try {
+      ackPlayingRef.current = true;
+      const res = await fetch(`/api/speak/ack?text=${encodeURIComponent(cfg.wakeWord.ack)}`);
+      if (!res.ok) return;
+      const buf = await res.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(buf);
+      const src = ctx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.connect(ctx.destination);
+      src.onended = () => {
+        ackPlayingRef.current = false;
+      };
+      await ctx.resume().catch(() => {});
+      src.start();
+    } catch {
+      ackPlayingRef.current = false;
+    }
   }, []);
 
-  const finalize = useCallback(() => {
+  const startRecording = useCallback(() => {
+    rollingRef.current = [];
+    recordingRef.current = [];
+    onsetCountRef.current = 0;
+    lastSpeechAtRef.current = performance.now();
+    recordingStartAtRef.current = performance.now();
+    gotoPhase("recording");
+  }, [gotoPhase]);
+
+  // After a turn is sent (or aborted), sit quiet in `working` if sticky is on
+  // (awaiting the read-aloud-complete re-arm), else return to wake-word-only.
+  const finishTurn = useCallback(() => {
+    gotoPhase(configRef.current.sticky.enabled ? "working" : "armed");
+  }, [gotoPhase]);
+
+  const stopAndTranscribe = useCallback(() => {
     const chunks = recordingRef.current;
     recordingRef.current = [];
-    const all = concat(chunks);
-    if (all.length === 0) {
-      phaseRef.current = "armed";
-      setPhase("armed");
+    if (chunks.length === 0) {
+      finishTurn();
       return;
     }
-    setPhase("transcribing");
-    phaseRef.current = "transcribing";
+    gotoPhase("transcribing");
     setError(null);
     const rate = sampleRateRef.current;
+    const all = concat(chunks);
     const at16k = rate === TARGET_RATE ? all : resampleTo16k(all, rate);
     const trimmed = at16k.length > TRAILING_TRIM_SAMPLES
       ? at16k.subarray(0, at16k.length - TRAILING_TRIM_SAMPLES)
@@ -106,15 +206,55 @@ export function useVoiceInput(onSend: (text: string) => void) {
       .then((data) => {
         const text = stripKeyword(data.text ?? "");
         if (text) onSend(text);
-        phaseRef.current = "armed";
-        setPhase("armed");
+        finishTurn();
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "Transcription failed");
-        phaseRef.current = "armed";
-        setPhase("armed");
+        finishTurn();
       });
-  }, [onSend]);
+  }, [onSend, gotoPhase, finishTurn]);
+
+  // Re-arm the sticky follow-up window. Called when the agent's spoken reply
+  // finishes (or the message completes if read-aloud is off).
+  const armSticky = useCallback(() => {
+    const cfg = configRef.current;
+    if (!enabledRef.current || !cfg.sticky.enabled) return;
+    const cur = phaseRef.current;
+    if (cur === "recording" || cur === "transcribing") return;
+    clearStickyTimer();
+    onsetCountRef.current = 0;
+    gotoPhase("sticky");
+    // Lapse gate: expire back to wake-word-only after lapseS of no speech.
+    stickyTimerRef.current = setTimeout(() => {
+      if (phaseRef.current === "sticky") gotoPhase("armed");
+    }, cfg.sticky.lapseS * 1000);
+  }, [clearStickyTimer, gotoPhase]);
+
+  useEffect(() => {
+    if (armSignal > 0) armSticky();
+  }, [armSignal, armSticky]);
+
+  // Config fetch + hot reload.
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const loadConfig = async () => {
+      try {
+        const res = await fetch("/api/voice-config");
+        if (!res.ok) return;
+        const data = (await res.json()) as unknown;
+        if (!cancelled) configRef.current = resolveVoiceConfig(data);
+      } catch {
+        // keep current config on transient failure
+      }
+    };
+    void loadConfig();
+    const timer = setInterval(() => void loadConfig(), CONFIG_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [enabled]);
 
   const pollKws = useCallback(async () => {
     if (kwsInFlightRef.current) return; // don't pile up if a poll is still running
@@ -134,20 +274,20 @@ export function useVoiceInput(onSend: (text: string) => void) {
       const detected = data.detected ?? null;
       if (detected) setLastDetected(detected);
       const current = phaseRef.current;
-      if (detected === "jarvis" && current === "armed") {
-        rollingRef.current = [];
-        recordingRef.current = [];
-        phaseRef.current = "recording";
-        setPhase("recording");
+      // Wake word: from armed (idle), working (safety valve), or sticky (fallback).
+      if (detected === "jarvis" && (current === "armed" || current === "working" || current === "sticky")) {
+        void playAck();
+        startRecording();
       } else if (detected === "finalize" && current === "recording") {
-        finalize();
+        // Optional early stop — never required. Silence is the default end.
+        stopAndTranscribe();
       }
     } catch {
       // ignore transient KWS errors
     } finally {
       kwsInFlightRef.current = false;
     }
-  }, [finalize]);
+  }, [playAck, startRecording, stopAndTranscribe]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -165,18 +305,66 @@ export function useVoiceInput(onSend: (text: string) => void) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
-        ctx = new AudioContext();
+        const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctor) throw new Error("Web Audio not available");
+        ctx = new Ctor();
+        ctxRef.current = ctx;
         sampleRateRef.current = ctx.sampleRate;
         node = ctx.createScriptProcessor(4096, 1, 1);
         node.onaudioprocess = (e) => {
           const data = new Float32Array(e.inputBuffer.getChannelData(0));
+          const cfg = configRef.current;
+          const cur = phaseRef.current;
+
+          // KWS rolling window is always fed.
           const maxChunks = Math.max(1, Math.ceil((ctx!.sampleRate * ROLLING_SECONDS) / data.length));
           rollingRef.current.push(data);
           if (rollingRef.current.length > maxChunks) {
             rollingRef.current.splice(0, rollingRef.current.length - maxChunks);
           }
-          if (phaseRef.current === "recording") {
-            recordingRef.current.push(data);
+
+          const db = rmsDb(data);
+
+          if (cur === "recording") {
+            // Don't capture the ack ("Yes?") playing through the mic.
+            if (!ackPlayingRef.current) recordingRef.current.push(data);
+            const now = performance.now();
+            const silenceDb =
+              floorDbRef.current === null
+                ? cfg.vad.volumeDb
+                : Math.max(-60, Math.min(-28, floorDbRef.current + cfg.vad.calibrationMarginDb));
+            if (db > silenceDb) lastSpeechAtRef.current = now;
+            // Hard cap — a stuck recording can't run forever.
+            if (recordingStartAtRef.current !== null && now - recordingStartAtRef.current > cfg.recording.maxDurationS * 1000) {
+              stopAndTranscribe();
+              return;
+            }
+            // Silence auto-stop (the primary end trigger).
+            if (lastSpeechAtRef.current !== null && now - lastSpeechAtRef.current > cfg.vad.silenceMs) {
+              stopAndTranscribe();
+              return;
+            }
+            return;
+          }
+
+          // Non-recording: feed the ambient noise floor (armed / sticky / working).
+          const amb = ambientRef.current;
+          amb.push(db);
+          if (amb.length > AMBIENT_MAX_CHUNKS) amb.shift();
+          floorDbRef.current = percentile([...amb].sort((a, b) => a - b), AMBIENT_PERCENTILE);
+
+          if (cur === "sticky") {
+            const silenceDb =
+              floorDbRef.current === null
+                ? cfg.vad.volumeDb
+                : Math.max(-60, Math.min(-28, floorDbRef.current + cfg.vad.calibrationMarginDb));
+            const onsetDb = silenceDb + cfg.sticky.onsetDb;
+            if (db > onsetDb) {
+              onsetCountRef.current += 1;
+              if (onsetCountRef.current >= ONSET_HOLD_CHUNKS) startRecording();
+            } else {
+              onsetCountRef.current = 0;
+            }
           }
         };
         const source = ctx.createMediaStreamSource(stream);
@@ -189,8 +377,7 @@ export function useVoiceInput(onSend: (text: string) => void) {
         timer = setInterval(() => {
           void pollKws();
         }, KWS_POLL_MS);
-        phaseRef.current = "armed";
-        setPhase("armed");
+        gotoPhase("armed");
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Microphone unavailable");
@@ -202,15 +389,18 @@ export function useVoiceInput(onSend: (text: string) => void) {
       if (timer) clearInterval(timer);
       if (node) node.disconnect();
       if (stream) stream.getTracks().forEach((t) => t.stop());
+      ctxRef.current = null;
       void ctx?.close();
+      clearStickyTimer();
       rollingRef.current = [];
       recordingRef.current = [];
+      ambientRef.current = [];
+      floorDbRef.current = null;
       if (phaseRef.current !== "transcribing") {
-        phaseRef.current = "idle";
-        setPhase("idle");
+        gotoPhase("idle");
       }
     };
-  }, [enabled, pollKws]);
+  }, [enabled, pollKws, gotoPhase, clearStickyTimer, startRecording, stopAndTranscribe]);
 
   return { enabled, setEnabled, phase, lastDetected, error };
 }

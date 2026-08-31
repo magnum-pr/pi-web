@@ -322,6 +322,12 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     await handleAbort();
   }, [handleAbort]);
 
+  // Voice follow-up re-arm: every time we want sticky listening re-opened (after
+  // the spoken reply finishes, or after the message completes when read-aloud is
+  // off), bump this counter. useVoiceInput (in ChatInput) reacts and opens the
+  // onset window; it ignores the signal entirely when voice input is disabled.
+  const [voiceArmSignal, setVoiceArmSignal] = useState(0);
+
   // Auto read-aloud: speak the latest assistant message when a prompt completes.
   const readAloudEnabled = readAloud.enabled;
   const readAloudSpeak = readAloud.speak;
@@ -334,9 +340,14 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       const aborted = readAloudAbortedRef.current;
       readAloudAbortedRef.current = false;
       if (aborted) return;
-      if (!completionNotificationsEnabled || !readAloudEnabled) return;
       const latest = [...messages].reverse().find((m) => m.role === "assistant" && getAssistantProseText(m));
-      if (latest) void readAloudSpeak(getAssistantProseText(latest));
+      if (!latest) return;
+      if (completionNotificationsEnabled && readAloudEnabled) {
+        void readAloudSpeak(getAssistantProseText(latest));
+        return; // sticky re-arms when playback completes (effect below)
+      }
+      // No spoken output → re-arm the follow-up window on completion.
+      setVoiceArmSignal((n) => n + 1);
       return;
     }
     if (!wasRunning && agentRunning) {
@@ -344,6 +355,16 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       readAloudAbortedRef.current = false;
     }
   }, [agentRunning, messages, completionNotificationsEnabled, readAloudEnabled, readAloudSpeak]);
+
+  // After the spoken reply finishes playing, re-arm voice follow-ups.
+  const prevReadAloudSpeakingRef = useRef(false);
+  useEffect(() => {
+    const wasSpeaking = prevReadAloudSpeakingRef.current;
+    prevReadAloudSpeakingRef.current = readAloud.speaking;
+    if (wasSpeaking && !readAloud.speaking) {
+      setVoiceArmSignal((n) => n + 1);
+    }
+  }, [readAloud.speaking]);
 
   useEffect(() => {
     if (
@@ -642,6 +663,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       readAloudVoices={readAloud.voices}
       readAloudVoice={readAloud.voice}
       onReadAloudVoiceChange={readAloud.setVoice}
+      voiceArmSignal={voiceArmSignal}
       draftKey={session?.id ?? newSessionDraftKey ?? undefined}
       cwd={session?.cwd ?? newSessionCwd}
     />

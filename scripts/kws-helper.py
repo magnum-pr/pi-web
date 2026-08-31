@@ -22,11 +22,18 @@ KEYWORDS = {
 }
 
 
-def main() -> None:
-    decoders = {
+def make_decoders(threshold: float | None = None) -> dict:
+    """Build one PocketSphinx decoder per keyword, optionally overriding the
+    sensitivity threshold for all keywords (from the voice config)."""
+    thr = threshold if threshold is not None else KEYWORDS["jarvis"]
+    return {
         kw: Decoder(Config(keyphrase=kw, kws_threshold=thr))
-        for kw, thr in KEYWORDS.items()
+        for kw, _ in KEYWORDS.items()
     }
+
+
+def main() -> None:
+    decoders = make_decoders()
 
     for line in sys.stdin:
         line = line.strip()
@@ -36,6 +43,11 @@ def main() -> None:
             req = json.loads(line)
         except ValueError:
             continue
+
+        # Optional per-request threshold override (hot-reloaded config).
+        threshold = req.get("threshold")
+        if isinstance(threshold, (int, float)):
+            decoders = make_decoders(float(threshold))
 
         pcm = base64.b64decode(req.get("audio", "") or "")
         detected = None

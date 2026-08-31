@@ -8,9 +8,20 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { join } from "node:path";
 import { resolveKwsConfig, type KwsConfig } from "./kws-config";
+import { DEFAULT_VOICE_CONFIG, resolveVoiceConfig } from "./voice-config";
+
+/** Read + validate the repo voice-config.json (hot-reloaded). Never throws. */
+function loadVoiceConfigFile(): unknown {
+  try {
+    return JSON.parse(readFileSync(join(process.cwd(), "voice-config.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
 
 interface Pending {
   resolve: (detected: string | null) => void;
@@ -101,7 +112,12 @@ export function detectKeyword(pcmBase64: string): Promise<string | null> {
   const child = state.child;
   return new Promise((resolve, reject) => {
     state.pending.set(id, { resolve, reject });
-    child.stdin!.write(JSON.stringify({ id, audio: pcmBase64 }) + "\n", (err) => {
+    // Wake-word sensitivity comes from the (hot-reloaded) voice config.
+    const threshold = resolveVoiceConfig(loadVoiceConfigFile()).wakeWord.threshold;
+    const msg = threshold !== DEFAULT_VOICE_CONFIG.wakeWord.threshold
+      ? JSON.stringify({ id, audio: pcmBase64, threshold })
+      : JSON.stringify({ id, audio: pcmBase64 });
+    child.stdin!.write(msg + "\n", (err) => {
       if (err) {
         state.pending.delete(id);
         reject(new KwsError(`KWS write failed: ${err.message}`));

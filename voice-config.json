@@ -1,0 +1,21 @@
+{
+  "wakeWord": {
+    "phrase": "jarvis",
+    "threshold": 1e-20,
+    "ackEnabled": true,
+    "ack": "Yes?"
+  },
+  "vad": {
+    "silenceMs": 3000,
+    "volumeDb": -28.0,
+    "calibrationMarginDb": 6.0
+  },
+  "recording": {
+    "maxDurationS": 45
+  },
+  "sticky": {
+    "enabled": true,
+    "lapseS": 20,
+    "onsetDb": 6.0
+  }
+}

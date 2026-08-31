@@ -83,6 +83,8 @@ interface Props {
   readAloudVoices?: string[];
   readAloudVoice?: string;
   onReadAloudVoiceChange?: (voice: string) => void;
+  /** Increments when the agent's spoken reply (or message) finishes — re-arms voice follow-ups. */
+  voiceArmSignal?: number;
   draftKey?: string;
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
@@ -452,6 +454,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
   readAloudEnabled, onReadAloudToggle, readAloudVoices, readAloudVoice, onReadAloudVoiceChange,
+  voiceArmSignal = 0,
   onPromptWithStreamingBehavior,
   draftKey,
   cwd,
@@ -537,7 +540,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const dictation = useDictation(insertText);
   const dictationRecording = dictation.phase === "recording";
   const dictationTranscribing = dictation.phase === "transcribing";
-  const voiceInput = useVoiceInput(onSend);
+  const voiceInput = useVoiceInput(onSend, voiceArmSignal);
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
