@@ -28,6 +28,7 @@ import { useI18n } from "@/hooks/useI18n";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
 import { DictationButton } from "./DictationButton";
+import { VoiceMicSelector } from "./VoiceMicSelector";
 import { DictationLevelMeter, DictationProcessing } from "./DictationLevel";
 import { useDictation } from "@/hooks/useDictation";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
@@ -2540,6 +2541,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <path d="M4.93 19.07a10 10 0 0 1 0-14.14" />
               </svg>
             </button>
+
+            <VoiceMicSelector
+              enabled={voiceInput.enabled}
+              micMode={voiceInput.micMode}
+              setMicMode={voiceInput.setMicMode}
+              devices={voiceInput.devices}
+            />
 
             <DictationButton dictation={dictation} />
 

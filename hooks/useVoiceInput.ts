@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { encodeWav, resampleTo16k } from "@/lib/audio";
+import { resolveMicDeviceId } from "@/lib/mic-routing";
 import { DEFAULT_VOICE_CONFIG, resolveVoiceConfig, type VoiceConfig } from "@/lib/voice-config";
 
 const TARGET_RATE = 16000;
@@ -91,6 +92,17 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
   const [lastDetected, setLastDetected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Mic routing: "output" = match the active output device (whisper-vtt hot
+  // swap), "default" = follow the system's selected input, or a concrete
+  // deviceId = manual pin. Persisted in localStorage.
+  const [micMode, setMicModeState] = useState<string>(() => {
+    if (typeof window === "undefined") return "output";
+    return localStorage.getItem("pi-voice-mic") || "output";
+  });
+  const [devices, setDevices] = useState<{ deviceId: string; label: string }[]>([]);
+  const [micDeviceId, setMicDeviceId] = useState<string | null>(null);
+  const [deviceTick, setDeviceTick] = useState(0);
+
   const enabledRef = useRef(enabled);
   useEffect(() => {
     enabledRef.current = enabled;
@@ -125,6 +137,15 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
     }
   }, []);
 
+  const setMicMode = useCallback((mode: string) => {
+    setMicModeState(mode);
+    try {
+      localStorage.setItem("pi-voice-mic", mode);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
   const setEnabled = useCallback((next: boolean) => {
     setEnabledState(next);
     try {
@@ -138,6 +159,50 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
       gotoPhase("idle");
     }
   }, [clearStickyTimer, gotoPhase]);
+
+  // Output-paired mic routing + hot-swap on device change.
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const run = async () => {
+      let perm: MediaStream | null = null;
+      try {
+        // Grant permission first so device labels are populated.
+        perm = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (cancelled) return;
+        const list = await navigator.mediaDevices.enumerateDevices();
+        const inputs = list
+          .filter((d) => d.kind === "audioinput")
+          .map((d) => ({ deviceId: d.deviceId, label: d.label || "" }));
+        setDevices(inputs);
+        const outLabel =
+          list.find((d) => d.kind === "audiooutput" && (d.deviceId === "default" || d.deviceId === "communications"))?.label || "";
+        const target =
+          micMode === "default"
+            ? "default"
+            : micMode === "output"
+              ? resolveMicDeviceId(inputs, outLabel)
+              : micMode;
+        setMicDeviceId((prev) => (prev === target ? prev : target));
+      } catch {
+        // leave the previous routing in place
+      } finally {
+        perm?.getTracks().forEach((t) => t.stop());
+      }
+    };
+    void run();
+    const onDev = () => {
+      // Auto modes hot-swap on device change; a manual pin does not.
+      if (micMode === "default" || micMode === "output") setDeviceTick((t) => t + 1);
+      void run();
+    };
+    navigator.mediaDevices?.addEventListener?.("devicechange", onDev);
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices?.removeEventListener?.("devicechange", onDev);
+    };
+  }, [enabled, micMode]);
+
 
   // Play the short "Yes?" wake acknowledgment (proves the mic heard "jarvis").
   const playAck = useCallback(async () => {
@@ -300,7 +365,15 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
 
     (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: micDeviceId ? { exact: micDeviceId } : undefined,
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1,
+          },
+        });
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -400,7 +473,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
         gotoPhase("idle");
       }
     };
-  }, [enabled, pollKws, gotoPhase, clearStickyTimer, startRecording, stopAndTranscribe]);
+  }, [enabled, micDeviceId, deviceTick, pollKws, gotoPhase, clearStickyTimer, startRecording, stopAndTranscribe]);
 
-  return { enabled, setEnabled, phase, lastDetected, error };
+  return { enabled, setEnabled, phase, lastDetected, error, micMode, setMicMode, devices };
 }
