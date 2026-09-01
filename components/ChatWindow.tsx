@@ -349,6 +349,38 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     });
   }, []);
 
+  // Draggable divider between the conversation and activity panes.
+  const [activityPct, setActivityPct] = useState<number>(() => {
+    if (typeof window === "undefined") return 40;
+    const n = Number.parseFloat(localStorage.getItem("pi-split-width") ?? "40");
+    return Number.isFinite(n) ? Math.min(70, Math.max(20, n)) : 40;
+  });
+  const activityPctRef = useRef(activityPct);
+  activityPctRef.current = activityPct;
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ startX: number; startPct: number; width: number } | null>(null);
+  const onSplitPointerDown = useCallback((e: React.PointerEvent) => {
+    const container = splitContainerRef.current;
+    if (!container) return;
+    dragRef.current = { startX: e.clientX, startPct: activityPctRef.current, width: container.clientWidth };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }, []);
+  const onSplitPointerMove = useCallback((e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d || d.width === 0) return;
+    const deltaPct = ((d.startX - e.clientX) / d.width) * 100;
+    setActivityPct(Math.min(70, Math.max(20, d.startPct + deltaPct)));
+  }, []);
+  const onSplitPointerUp = useCallback((e: React.PointerEvent) => {
+    dragRef.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    try {
+      localStorage.setItem("pi-split-width", String(activityPctRef.current));
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
   // Auto read-aloud: speak the latest assistant message when a prompt completes.
   const readAloudEnabled = readAloud.enabled;
   const readAloudSpeak = readAloud.speak;
@@ -815,7 +847,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       ) : (
       <>
       <ProjectStateHeader cwd={session?.cwd} sessionStats={sessionStats} contextUsage={contextUsage} />
-      <div className="relative flex min-w-0 flex-1 overflow-hidden">
+      <div ref={splitContainerRef} className="relative flex min-w-0 flex-1 overflow-hidden">
         <button
           type="button"
           onClick={toggleSplitView}
@@ -1062,7 +1094,19 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
           </div>
         </div>
         {splitView && (
-          <div style={{ flex: "0 0 40%", minWidth: 0, borderLeft: "1px solid var(--border)", overflowY: "auto", ["scrollbarWidth" as string]: "none" }}>
+          <div
+            onPointerDown={onSplitPointerDown}
+            onPointerMove={onSplitPointerMove}
+            onPointerUp={onSplitPointerUp}
+            title="Drag to resize"
+            style={{
+              flex: "0 0 4px", cursor: "col-resize", touchAction: "none",
+              background: "var(--border)", opacity: 0.6, zIndex: 10,
+            }}
+          />
+        )}
+        {splitView && (
+          <div style={{ width: `${activityPct}%`, minWidth: 0, borderLeft: "1px solid var(--border)", overflowY: "auto", ["scrollbarWidth" as string]: "none" }}>
             <ActivityPane messages={messages} streamingMessage={streamState.streamingMessage} isStreaming={streamState.isStreaming} toolResultsMap={toolResultsMap} cwd={messageCwd} onOpenDiff={onOpenDiff} />
           </div>
         )}
