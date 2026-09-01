@@ -13,6 +13,7 @@ Two PocketSphinx decoders run in parallel (one per keyword). Offline, no keys.
 import base64
 import json
 import sys
+from typing import Optional
 
 from pocketsphinx import Config, Decoder
 
@@ -22,7 +23,7 @@ KEYWORDS = {
 }
 
 
-def make_decoders(threshold: float | None = None) -> dict:
+def make_decoders(threshold: Optional[float] = None) -> dict:
     """Build one PocketSphinx decoder per keyword, optionally overriding the
     sensitivity threshold for all keywords (from the voice config)."""
     thr = threshold if threshold is not None else KEYWORDS["jarvis"]
