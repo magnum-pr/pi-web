@@ -1061,7 +1061,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         </div>
         {splitView && (
           <div style={{ flex: "0 0 40%", minWidth: 0, borderLeft: "1px solid var(--border)", overflowY: "auto", ["scrollbarWidth" as string]: "none" }}>
-            <ActivityPane messages={messages} />
+            <ActivityPane messages={messages} streamingMessage={streamState.streamingMessage} isStreaming={streamState.isStreaming} />
           </div>
         )}
         {isMobile ? null : (
