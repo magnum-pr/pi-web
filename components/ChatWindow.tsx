@@ -664,6 +664,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       readAloudVoice={readAloud.voice}
       onReadAloudVoiceChange={readAloud.setVoice}
       voiceArmSignal={voiceArmSignal}
+      voiceMicMuted={readAloud.speaking}
       draftKey={session?.id ?? newSessionDraftKey ?? undefined}
       cwd={session?.cwd ?? newSessionCwd}
     />

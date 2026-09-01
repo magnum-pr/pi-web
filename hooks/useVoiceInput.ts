@@ -83,7 +83,7 @@ function percentile(sorted: number[], p: number): number {
  * auto-stops and auto-sends (no "finalize" required); after the agent's
  * spoken reply finishes, a sticky onset window re-arms for follow-ups.
  */
-export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
+export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, micMuted = false) {
   const [enabled, setEnabledState] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(STORAGE_KEY) === "true";
@@ -115,6 +115,17 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
   const kwsInFlightRef = useRef(false);
   const configRef = useRef<VoiceConfig>(DEFAULT_VOICE_CONFIG);
   const ctxRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const mutedRef = useRef(false);
+  useEffect(() => {
+    mutedRef.current = micMuted;
+    // Disable the mic track while the assistant is speaking so it can't hear
+    // its own synthesized voice (no false wake word / no floor pollution).
+    const s = streamRef.current;
+    s?.getAudioTracks().forEach((t) => {
+      t.enabled = !micMuted;
+    });
+  }, [micMuted]);
 
   // Amplitude / VAD / sticky state.
   const ambientRef = useRef<number[]>([]);
@@ -378,6 +389,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
+        streamRef.current = stream;
         const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!Ctor) throw new Error("Web Audio not available");
         ctx = new Ctor();
@@ -421,10 +433,12 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
           }
 
           // Non-recording: feed the ambient noise floor (armed / sticky / working).
-          const amb = ambientRef.current;
-          amb.push(db);
-          if (amb.length > AMBIENT_MAX_CHUNKS) amb.shift();
-          floorDbRef.current = percentile([...amb].sort((a, b) => a - b), AMBIENT_PERCENTILE);
+          if (!mutedRef.current) {
+            const amb = ambientRef.current;
+            amb.push(db);
+            if (amb.length > AMBIENT_MAX_CHUNKS) amb.shift();
+            floorDbRef.current = percentile([...amb].sort((a, b) => a - b), AMBIENT_PERCENTILE);
+          }
 
           if (cur === "sticky") {
             const silenceDb =
@@ -462,6 +476,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0) {
       if (timer) clearInterval(timer);
       if (node) node.disconnect();
       if (stream) stream.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
       ctxRef.current = null;
       void ctx?.close();
       clearStickyTimer();

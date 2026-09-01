@@ -86,6 +86,8 @@ interface Props {
   onReadAloudVoiceChange?: (voice: string) => void;
   /** Increments when the agent's spoken reply (or message) finishes — re-arms voice follow-ups. */
   voiceArmSignal?: number;
+  /** True while the assistant's read-aloud is playing — mutes the voice mic so it can't hear itself. */
+  voiceMicMuted?: boolean;
   draftKey?: string;
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
@@ -456,6 +458,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   soundEnabled, onSoundToggle, onAudioUnlock,
   readAloudEnabled, onReadAloudToggle, readAloudVoices, readAloudVoice, onReadAloudVoiceChange,
   voiceArmSignal = 0,
+  voiceMicMuted = false,
   onPromptWithStreamingBehavior,
   draftKey,
   cwd,
@@ -541,7 +544,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const dictation = useDictation(insertText);
   const dictationRecording = dictation.phase === "recording";
   const dictationTranscribing = dictation.phase === "transcribing";
-  const voiceInput = useVoiceInput(onSend, voiceArmSignal);
+  const voiceInput = useVoiceInput(onSend, voiceArmSignal, voiceMicMuted);
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
