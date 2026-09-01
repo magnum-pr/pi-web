@@ -202,6 +202,8 @@ interface Props {
   writtenFiles?: WrittenFile[];
   onReadAloud?: (text: string) => void;
   readingText?: string | null;
+  /** When true, hide tool-call blocks and written-files (conversation-only view). */
+  hideToolActivity?: boolean;
 }
 
 function formatTime(ts?: number): string | null {
@@ -250,12 +252,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, onReadAloud, readingText }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, onReadAloud, readingText, hideToolActivity }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} writtenFiles={writtenFiles} onReadAloud={onReadAloud} readingText={readingText} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} writtenFiles={writtenFiles} onReadAloud={onReadAloud} readingText={readingText} hideToolActivity={hideToolActivity} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -268,6 +270,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     return <CustomMessageView message={message as CustomMessage} cwd={cwd} onOpenFile={onOpenFile} />;
   }
   if (message.role === "bashExecution") {
+    if (hideToolActivity) return null;
     return <BashExecutionView message={message as BashExecutionMessage} sessionId={sessionId} />;
   }
   return null;
@@ -588,6 +591,7 @@ function AssistantMessageView({
   writtenFiles,
   onReadAloud,
   readingText,
+  hideToolActivity,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -603,12 +607,14 @@ function AssistantMessageView({
   writtenFiles?: WrittenFile[];
   onReadAloud?: (text: string) => void;
   readingText?: string | null;
+  hideToolActivity?: boolean;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
   const blockItems = useMemo(() => (message.content ?? [])
     .map((block, originalIndex) => ({ block, originalIndex }))
-    .filter(({ block }) => !isEmptyThinkingBlock(block, { isStreaming })), [message.content, isStreaming]);
+    .filter(({ block }) => !isEmptyThinkingBlock(block, { isStreaming }))
+    .filter(({ block }) => !(hideToolActivity && block.type === "toolCall")), [message.content, isStreaming, hideToolActivity]);
   const blocks = useMemo(() => blockItems.map(({ block }) => block), [blockItems]);
   const providerError = getAssistantErrorMessage(message, { isStreaming });
   const [hovered, setHovered] = useState(false);
@@ -807,7 +813,7 @@ function AssistantMessageView({
         </div>
       )}
 
-      {writtenFiles && writtenFiles.length > 0 && (
+      {writtenFiles && writtenFiles.length > 0 && !hideToolActivity && (
         <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />
       )}
 

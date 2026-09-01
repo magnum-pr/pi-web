@@ -9,6 +9,7 @@ import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-fi
 import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
+import { ActivityPane } from "./ActivityPane";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { ProjectStateHeader } from "./ProjectStateHeader";
 import { useI18n } from "@/hooks/useI18n";
@@ -327,6 +328,24 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   // off), bump this counter. useVoiceInput (in ChatInput) reacts and opens the
   // onset window; it ignores the signal entirely when voice input is disabled.
   const [voiceArmSignal, setVoiceArmSignal] = useState(0);
+
+  // Two-pane split view: conversation (text only) on the left, tool/command
+  // activity on the right. Opt-in, persisted.
+  const [splitView, setSplitView] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("pi-split-view") === "true";
+  });
+  const toggleSplitView = useCallback(() => {
+    setSplitView((s) => {
+      const next = !s;
+      try {
+        localStorage.setItem("pi-split-view", String(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
 
   // Auto read-aloud: speak the latest assistant message when a prompt completes.
   const readAloudEnabled = readAloud.enabled;
@@ -795,6 +814,22 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       <>
       <ProjectStateHeader cwd={session?.cwd} sessionStats={sessionStats} contextUsage={contextUsage} />
       <div className="relative flex min-w-0 flex-1 overflow-hidden">
+        <button
+          type="button"
+          onClick={toggleSplitView}
+          title={splitView ? "Close activity panel" : "Split view: conversation | activity"}
+          aria-label="Toggle split view"
+          style={{
+            position: "absolute", top: 8, right: 12, zIndex: 20,
+            display: "flex", alignItems: "center", gap: 5,
+            padding: "4px 8px", height: 24,
+            background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 7,
+            color: splitView ? "var(--accent)" : "var(--text-muted)",
+            cursor: "pointer", fontSize: 11, fontWeight: 500,
+          }}
+        >
+          {splitView ? "✕ activity" : "▣ split"}
+        </button>
         <div ref={scrollContainerRef} className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]">
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
             <div ref={messageContentRef} style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
@@ -862,6 +897,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     onFork={sessionBusy || isNew || (idx === 0 && msg.role === "user") ? undefined : handleFork}
                     forking={forkingEntryId === entryIds[idx]}
                     onNavigate={sessionBusy ? undefined : handleNavigate}
+                    hideToolActivity={splitView}
                     prevAssistantEntryId={sessionBusy ? undefined : prevAssistantEntryId}
                     onEditContent={handleEditContent}
                     showTimestamp={showTimestamp}
@@ -989,7 +1025,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               );
             })()}
             {streamState.isStreaming && hasStreamingContent && streamState.streamingMessage && (
-              <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} />
+              <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} hideToolActivity={splitView} />
             )}
 
             {agentRunning && !hasStreamingContent && agentPhase && (
@@ -1023,6 +1059,11 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             </div>
           </div>
         </div>
+        {splitView && (
+          <div style={{ flex: "0 0 40%", minWidth: 0, borderLeft: "1px solid var(--border)", overflowY: "auto", ["scrollbarWidth" as string]: "none" }}>
+            <ActivityPane messages={messages} />
+          </div>
+        )}
         {isMobile ? null : (
           <ChatMinimap
             messages={messages}
