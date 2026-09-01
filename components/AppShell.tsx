@@ -896,6 +896,10 @@ export function AppShell() {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null });
   }, [handleOpenFile, selectedSession?.id]);
 
+  const handleOpenDiff = useCallback((filePath: string) => {
+    handleOpenFile(filePath, getFileName(filePath), { modeHint: "diff", sourceSessionId: selectedSession?.id ?? null });
+  }, [handleOpenFile, selectedSession?.id]);
+
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);
@@ -2241,6 +2245,7 @@ export function AppShell() {
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
               onOpenSession={handleOpenSession}
+              onOpenDiff={handleOpenDiff}
               soundEnabled={soundEnabled}
               onSoundToggle={onSoundToggle}
               playDoneSound={playDoneSound}

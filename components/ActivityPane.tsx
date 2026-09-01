@@ -1,15 +1,21 @@
 "use client";
 
 import { useMemo } from "react";
-import type { AgentMessage } from "@/lib/types";
+import type { AgentMessage, ToolResultMessage } from "@/lib/types";
+import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 
 interface ActivityRow {
   id: string;
-  icon: "tool" | "bash";
+  icon: "tool" | "bash" | "file";
   title: string;
   detail: string;
   exitCode?: number;
   running?: boolean;
+  filePath?: string;
+}
+
+function basename(p: string): string {
+  return p.split("/").pop() ?? p;
 }
 
 /** Collapse a toolCall block's input to a single line for the activity feed. */
@@ -69,13 +75,30 @@ function toolRowsFrom(msg: AgentMessage, prefix: string, running: boolean): Acti
  * commands the agent is running. Settled messages plus the streaming message
  * (so in-progress calls appear immediately, marked running).
  */
-export function ActivityPane({ messages, streamingMessage, isStreaming }: {
+export function ActivityPane({ messages, streamingMessage, isStreaming, toolResultsMap, cwd, onOpenDiff }: {
   messages: AgentMessage[];
   streamingMessage?: AgentMessage | null;
   isStreaming?: boolean;
+  toolResultsMap?: Map<string, ToolResultMessage>;
+  cwd?: string;
+  onOpenDiff?: (filePath: string) => void;
 }) {
   const rows = useMemo<ActivityRow[]>(() => {
     const out: ActivityRow[] = [];
+    const seenFiles = new Set<string>();
+    const addFiles = (files: WrittenFile[]) => {
+      for (const f of files) {
+        if (seenFiles.has(f.filePath)) continue;
+        seenFiles.add(f.filePath);
+        out.push({
+          id: `file-${f.filePath}`,
+          icon: "file",
+          title: basename(f.filePath),
+          detail: f.filePath,
+          filePath: f.filePath,
+        });
+      }
+    };
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i];
       if (m.role === "bashExecution") {
@@ -89,13 +112,17 @@ export function ActivityPane({ messages, streamingMessage, isStreaming }: {
         continue;
       }
       out.push(...toolRowsFrom(m, `${i}-m`, false));
+      // Files this turn actually wrote/edited (successful write/edit tool calls).
+      if (m.role === "assistant") {
+        addFiles(extractTurnWrittenFiles(m.content ?? [], toolResultsMap, cwd));
+      }
     }
     // Live tail: tool calls in the not-yet-settled streaming message.
     if (isStreaming && streamingMessage) {
       out.push(...toolRowsFrom(streamingMessage, `live`, true));
     }
     return out;
-  }, [messages, streamingMessage, isStreaming]);
+  }, [messages, streamingMessage, isStreaming, cwd, toolResultsMap]);
 
   if (rows.length === 0) {
     return (
@@ -113,19 +140,27 @@ export function ActivityPane({ messages, streamingMessage, isStreaming }: {
       {rows.map((r) => (
         <div
           key={r.id}
+          onClick={r.filePath && onOpenDiff ? () => onOpenDiff(r.filePath!) : undefined}
+          title={r.filePath && onOpenDiff ? "Open diff" : undefined}
           style={{
             display: "flex", alignItems: "flex-start", gap: 8,
             padding: "6px 8px", borderRadius: 7, fontSize: 12,
             borderLeft: r.running ? "2px solid var(--accent)" : "2px solid transparent",
-            background: r.icon === "bash" ? "rgba(156,163,175,0.08)" : "rgba(59,130,246,0.06)",
+            background: r.icon === "bash" ? "rgba(156,163,175,0.08)" : r.icon === "file" ? "rgba(16,185,129,0.07)" : "rgba(59,130,246,0.06)",
             color: "var(--text)",
             overflow: "hidden",
+            cursor: r.filePath && onOpenDiff ? "pointer" : "default",
+          }}
+          onMouseEnter={(e) => { if (r.filePath && onOpenDiff) e.currentTarget.style.background = "var(--bg-hover)"; }}
+          onMouseLeave={(e) => {
+            if (!r.filePath || !onOpenDiff) return;
+            e.currentTarget.style.background = r.icon === "bash" ? "rgba(156,163,175,0.08)" : r.icon === "file" ? "rgba(16,185,129,0.07)" : "rgba(59,130,246,0.06)";
           }}
         >
-          <span style={{ flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: 11, width: 18, color: r.running ? "var(--accent)" : r.icon === "bash" ? "var(--text-muted)" : "var(--accent)" }}>
+          <span style={{ flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: 11, width: 18, color: r.running ? "var(--accent)" : r.icon === "file" ? "#10b981" : r.icon === "bash" ? "var(--text-muted)" : "var(--accent)" }}>
             {r.running ? (
               <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: "var(--accent)", animation: "pulse 1.2s ease-in-out infinite", verticalAlign: "middle" }} />
-            ) : r.icon === "bash" ? "$" : "⚙"}
+            ) : r.icon === "bash" ? "$" : r.icon === "file" ? "✎" : "⚙"}
           </span>
           <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
