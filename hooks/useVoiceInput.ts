@@ -333,6 +333,12 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   }, [enabled]);
 
   const pollKws = useCallback(async () => {
+    if (mutedRef.current) {
+      // Mic muted during read-aloud — never run the wake-word spotter on the
+      // assistant's own voice, and drop anything captured while muted.
+      rollingRef.current = [];
+      return;
+    }
     if (kwsInFlightRef.current) return; // don't pile up if a poll is still running
     const rolling = rollingRef.current;
     if (rolling.length === 0) return;
@@ -397,6 +403,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
         sampleRateRef.current = ctx.sampleRate;
         node = ctx.createScriptProcessor(4096, 1, 1);
         node.onaudioprocess = (e) => {
+          if (mutedRef.current) return; // mic muted during read-aloud — drop audio
           const data = new Float32Array(e.inputBuffer.getChannelData(0));
           const cfg = configRef.current;
           const cur = phaseRef.current;
