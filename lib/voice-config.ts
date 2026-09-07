@@ -52,7 +52,7 @@ export interface VoiceConfig {
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   wakeWord: { phrase: "oracle", threshold: 1e-8, ackEnabled: true, ack: "Yes?" },
-  stopWord: { phrase: "send it", threshold: 1e-5 },
+  stopWord: { phrase: "over", threshold: 1e-5 },
   vad: { silenceMs: 3000, volumeDb: -28.0, calibrationMarginDb: 6.0 },
   recording: { maxDurationS: 45 },
   sticky: { enabled: true, lapseS: 30, onsetDb: 6.0 },

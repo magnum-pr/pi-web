@@ -6,8 +6,8 @@
     "ack": "Yes?"
   },
   "stopWord": {
-    "phrase": "send it",
-    "threshold": 1e-5
+    "phrase": "over",
+    "threshold": 1e-2
   },
   "vad": {
     "silenceMs": 3000,
