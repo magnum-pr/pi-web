@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { resolveKwsConfig, type KwsConfig } from "./kws-config";
-import { DEFAULT_VOICE_CONFIG, resolveVoiceConfig } from "./voice-config";
+import { resolveVoiceConfig } from "./voice-config";
 
 /** Read + validate the repo voice-config.json (hot-reloaded). Never throws. */
 function loadVoiceConfigFile(): unknown {
@@ -35,8 +35,13 @@ interface Pending {
 interface KwsSingleton {
   config: KwsConfig;
   child: ChildProcess | null;
-  /** The wake/stop phrases the current child was spawned with. */
-  spawnedWith: { wake: string; stop: string } | null;
+  /** The wake/stop phrases + thresholds the current child was spawned with. */
+  spawnedWith: {
+    wake: string;
+    stop: string;
+    wakeThreshold: number;
+    stopThreshold: number;
+  } | null;
   error: string | null;
   pending: Map<string, Pending>;
   nextId: number;
@@ -80,10 +85,18 @@ function spawnHelper(state: KwsSingleton): void {
   state.spawnedWith = {
     wake: vc.wakeWord.phrase,
     stop: vc.stopWord.phrase,
+    wakeThreshold: vc.wakeWord.threshold,
+    stopThreshold: vc.stopWord.threshold,
   };
   const child = spawn(
     state.config.python,
-    [state.config.helper, "--wake", vc.wakeWord.phrase, "--stop", vc.stopWord.phrase],
+    [
+      state.config.helper,
+      "--wake", vc.wakeWord.phrase,
+      "--stop", vc.stopWord.phrase,
+      "--wake-threshold", String(vc.wakeWord.threshold),
+      "--stop-threshold", String(vc.stopWord.threshold),
+    ],
     { stdio: ["pipe", "pipe", "pipe"] },
   );
   state.child = child;
@@ -122,15 +135,22 @@ function spawnHelper(state: KwsSingleton): void {
  */
 function ensureFreshHelper(state: KwsSingleton): void {
   const vc = resolveVoiceConfig(loadVoiceConfigFile());
-  const cur = { wake: vc.wakeWord.phrase, stop: vc.stopWord.phrase };
+  const cur = {
+    wake: vc.wakeWord.phrase,
+    stop: vc.stopWord.phrase,
+    wakeThreshold: vc.wakeWord.threshold,
+    stopThreshold: vc.stopWord.threshold,
+  };
   if (!state.child) {
     spawnHelper(state);
   } else if (
     !state.spawnedWith ||
     state.spawnedWith.wake !== cur.wake ||
-    state.spawnedWith.stop !== cur.stop
+    state.spawnedWith.stop !== cur.stop ||
+    state.spawnedWith.wakeThreshold !== cur.wakeThreshold ||
+    state.spawnedWith.stopThreshold !== cur.stopThreshold
   ) {
-    rejectAll(state, "KWS helper restarting (phrases changed)");
+    rejectAll(state, "KWS helper restarting (phrases/thresholds changed)");
     try {
       state.child.kill();
     } catch {
@@ -154,12 +174,7 @@ export function detectKeyword(pcmBase64: string): Promise<string | null> {
   const child = state.child;
   return new Promise((resolve, reject) => {
     state.pending.set(id, { resolve, reject });
-    // Wake-word sensitivity comes from the (hot-reloaded) voice config.
-    const threshold = resolveVoiceConfig(loadVoiceConfigFile()).wakeWord.threshold;
-    const msg = threshold !== DEFAULT_VOICE_CONFIG.wakeWord.threshold
-      ? JSON.stringify({ id, audio: pcmBase64, threshold })
-      : JSON.stringify({ id, audio: pcmBase64 });
-    child.stdin!.write(msg + "\n", (err) => {
+    child.stdin!.write(JSON.stringify({ id, audio: pcmBase64 }) + "\n", (err) => {
       if (err) {
         state.pending.delete(id);
         reject(new KwsError(`KWS write failed: ${err.message}`));

@@ -51,8 +51,8 @@ export interface VoiceConfig {
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
-  wakeWord: { phrase: "oracle", threshold: 1e-20, ackEnabled: true, ack: "Yes?" },
-  stopWord: { phrase: "send it", threshold: 1e-20 },
+  wakeWord: { phrase: "oracle", threshold: 1e-8, ackEnabled: true, ack: "Yes?" },
+  stopWord: { phrase: "send it", threshold: 1e-5 },
   vad: { silenceMs: 3000, volumeDb: -28.0, calibrationMarginDb: 6.0 },
   recording: { maxDurationS: 45 },
   sticky: { enabled: true, lapseS: 30, onsetDb: 6.0 },
@@ -85,6 +85,7 @@ export function resolveVoiceConfig(raw: unknown): VoiceConfig {
   const sticky = (r.sticky && typeof r.sticky === "object" ? r.sticky : {}) as Record<string, unknown>;
 
   return {
+    // PocketSphinx kws_threshold — HIGHER = stricter (fewer false triggers).
     wakeWord: {
       phrase: pick(wake.phrase, DEFAULT_VOICE_CONFIG.wakeWord.phrase, isStr),
       threshold: clampNum(wake.threshold, DEFAULT_VOICE_CONFIG.wakeWord.threshold, 1e-40, 1),
@@ -93,6 +94,8 @@ export function resolveVoiceConfig(raw: unknown): VoiceConfig {
     },
     stopWord: {
       phrase: pick(stop.phrase, DEFAULT_VOICE_CONFIG.stopWord.phrase, isStr),
+      // Keep the stop phrase stricter than the wake word so common words like
+      // "send it" don't false-trigger mid-speech.
       threshold: clampNum(stop.threshold, DEFAULT_VOICE_CONFIG.stopWord.threshold, 1e-40, 1),
     },
     vad: {

@@ -24,12 +24,15 @@ from typing import Optional
 from pocketsphinx import Config, Decoder
 
 
-def make_decoders(wake: str, stop: str, threshold: Optional[float] = None) -> dict:
-    """Build one PocketSphinx decoder per phrase."""
-    thr = threshold if threshold is not None else 1e-20
+def make_decoders(wake: str, stop: str, wake_thr: float, stop_thr: float) -> dict:
+    """Build one PocketSphinx decoder per phrase, each with its own threshold.
+
+    PocketSphinx `kws_threshold`: LOWER = more sensitive (more false
+    positives); HIGHER = stricter (fewer triggers).
+    """
     return {
-        "wake": Decoder(Config(keyphrase=wake, kws_threshold=thr)),
-        "stop": Decoder(Config(keyphrase=stop, kws_threshold=thr)),
+        "wake": Decoder(Config(keyphrase=wake, kws_threshold=wake_thr)),
+        "stop": Decoder(Config(keyphrase=stop, kws_threshold=stop_thr)),
     }
 
 
@@ -37,9 +40,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--wake", default="oracle")
     parser.add_argument("--stop", default="send it")
+    parser.add_argument("--wake-threshold", type=float, default=None)
+    parser.add_argument("--stop-threshold", type=float, default=None)
     args = parser.parse_args()
 
-    decoders = make_decoders(args.wake, args.stop)
+    wake_thr = args.wake_threshold if args.wake_threshold is not None else 1e-5
+    stop_thr = args.stop_threshold if args.stop_threshold is not None else 1e-5
+    decoders = make_decoders(args.wake, args.stop, wake_thr, stop_thr)
 
     for line in sys.stdin:
         line = line.strip()
@@ -49,11 +56,6 @@ def main() -> None:
             req = json.loads(line)
         except ValueError:
             continue
-
-        # Optional per-request threshold override (hot-reloaded config).
-        threshold = req.get("threshold")
-        if isinstance(threshold, (int, float)):
-            decoders = make_decoders(args.wake, args.stop, float(threshold))
 
         pcm = base64.b64decode(req.get("audio", "") or "")
         detected = None
