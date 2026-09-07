@@ -1,9 +1,13 @@
 {
   "wakeWord": {
-    "phrase": "jarvis",
+    "phrase": "oracle",
     "threshold": 1e-20,
     "ackEnabled": true,
     "ack": "Yes?"
+  },
+  "stopWord": {
+    "phrase": "send it",
+    "threshold": 1e-20
   },
   "vad": {
     "silenceMs": 3000,
@@ -11,11 +15,11 @@
     "calibrationMarginDb": 6.0
   },
   "recording": {
-    "maxDurationS": 45
+    "maxDurationS": 60
   },
   "sticky": {
     "enabled": true,
-    "lapseS": 30,
+    "lapseS": 90,
     "onsetDb": 6.0
   }
 }

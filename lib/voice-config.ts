@@ -10,6 +10,7 @@
  */
 
 export interface VoiceConfig {
+  /** Wake word that arms recording. */
   wakeWord: {
     /** Spoken phrase that arms recording. */
     phrase: string;
@@ -19,6 +20,13 @@ export interface VoiceConfig {
     ackEnabled: boolean;
     /** The ack phrase to speak (via piper TTS). */
     ack: string;
+  };
+  /** Stop word/phrase that ends recording + sends (optional early stop). */
+  stopWord: {
+    /** Spoken phrase that ends + sends, e.g. "send it". */
+    phrase: string;
+    /** PocketSphinx sensitivity for the stop phrase. */
+    threshold: number;
   };
   vad: {
     /** Auto-stop after this much continuous quiet, in ms. */
@@ -43,7 +51,8 @@ export interface VoiceConfig {
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
-  wakeWord: { phrase: "jarvis", threshold: 1e-20, ackEnabled: true, ack: "Yes?" },
+  wakeWord: { phrase: "oracle", threshold: 1e-20, ackEnabled: true, ack: "Yes?" },
+  stopWord: { phrase: "send it", threshold: 1e-20 },
   vad: { silenceMs: 3000, volumeDb: -28.0, calibrationMarginDb: 6.0 },
   recording: { maxDurationS: 45 },
   sticky: { enabled: true, lapseS: 30, onsetDb: 6.0 },
@@ -70,6 +79,7 @@ function pick<T>(v: unknown, fallback: T, check: (x: unknown) => x is T): T {
 export function resolveVoiceConfig(raw: unknown): VoiceConfig {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const wake = (r.wakeWord && typeof r.wakeWord === "object" ? r.wakeWord : {}) as Record<string, unknown>;
+  const stop = (r.stopWord && typeof r.stopWord === "object" ? r.stopWord : {}) as Record<string, unknown>;
   const vad = (r.vad && typeof r.vad === "object" ? r.vad : {}) as Record<string, unknown>;
   const rec = (r.recording && typeof r.recording === "object" ? r.recording : {}) as Record<string, unknown>;
   const sticky = (r.sticky && typeof r.sticky === "object" ? r.sticky : {}) as Record<string, unknown>;
@@ -80,6 +90,10 @@ export function resolveVoiceConfig(raw: unknown): VoiceConfig {
       threshold: clampNum(wake.threshold, DEFAULT_VOICE_CONFIG.wakeWord.threshold, 1e-40, 1),
       ackEnabled: pick(wake.ackEnabled, DEFAULT_VOICE_CONFIG.wakeWord.ackEnabled, isBool),
       ack: pick(wake.ack, DEFAULT_VOICE_CONFIG.wakeWord.ack, isStr),
+    },
+    stopWord: {
+      phrase: pick(stop.phrase, DEFAULT_VOICE_CONFIG.stopWord.phrase, isStr),
+      threshold: clampNum(stop.threshold, DEFAULT_VOICE_CONFIG.stopWord.threshold, 1e-40, 1),
     },
     vad: {
       silenceMs: clampNum(vad.silenceMs, DEFAULT_VOICE_CONFIG.vad.silenceMs, 500, 15000),

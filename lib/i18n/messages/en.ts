@@ -329,7 +329,7 @@ export const enLocale: LocalePlugin = {
     "chat.readAloudVoice": "Voice",
     "chat.enableReadAloud": "Enable auto read-aloud",
     "chat.disableReadAloud": "Disable auto read-aloud",
-    "chat.enableVoiceInput": "Enable voice wake word (say \"jarvis\")",
+    "chat.enableVoiceInput": "Enable voice wake word",
     "chat.disableVoiceInput": "Disable voice wake word",
     "chat.dictate": "Dictate",
     "chat.stopDictation": "Stop dictation",

@@ -53,13 +53,32 @@ function toBase64Pcm16k(chunks: Float32Array[], fromRate: number): string {
   return btoa(binary);
 }
 
-/** Strip the wake/end keywords from a transcription (safety net for leaks). */
-function stripKeyword(text: string): string {
-  return text
-    .replace(/^(?:hey\s+)?jarvis[,!.\s]*/i, "")
-    .replace(/\s*\b(?:finali[sz]e(?:d|ing)?|finalise(?:d|ing)?)\b\s*[.!?]*$/i, "")
-    .trim();
+/** Escape a phrase for use in a RegExp. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+/**
+ * Strip the wake + stop phrases from a transcription (safety net for leaks).
+ * The wake phrase may lead the text (optionally after "hey"); the stop
+ * phrase may trail it. Falls back to stripping nothing if a phrase is empty.
+ */
+function stripKeyword(text: string, config: VoiceConfig): string {
+  const wake = config.wakeWord.phrase.trim();
+  const stop = config.stopWord.phrase.trim();
+  let out = text;
+  if (wake) {
+    out = out.replace(new RegExp(`^(?:hey\\s+)?${escapeRegExp(wake)}[,!.\\s]*`, "i"), "");
+  }
+  if (stop) {
+    out = out.replace(
+      new RegExp(`\\s*\\b${escapeRegExp(stop)}\\b\\s*[.!?]*$`, "i"),
+      "",
+    );
+  }
+  return out.trim();
+}
+
 
 /** RMS of a mono chunk in dB, floored at -60. */
 function rmsDb(samples: Float32Array): number {
@@ -79,9 +98,10 @@ function percentile(sorted: number[], p: number): number {
 }
 
 /**
- * Continuous voice input: wake word ("jarvis") arms recording; silence
- * auto-stops and auto-sends (no "finalize" required); after the agent's
- * spoken reply finishes, a sticky onset window re-arms for follow-ups.
+ * Continuous voice input: the wake word (from voice-config) arms recording;
+ * silence auto-stops and auto-sends (no stop phrase required); the stop
+ * phrase provides an optional early stop. After the agent's spoken reply
+ * finishes, a sticky onset window re-arms for follow-ups.
  */
 export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, micMuted = false) {
   const [enabled, setEnabledState] = useState<boolean>(() => {
@@ -215,7 +235,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   }, [enabled, micMode]);
 
 
-  // Play the short "Yes?" wake acknowledgment (proves the mic heard "jarvis").
+  // Play the short wake acknowledgment (proves the mic heard the wake word).
   const playAck = useCallback(async () => {
     const cfg = configRef.current;
     if (!cfg.wakeWord.ackEnabled) return;
@@ -280,7 +300,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
         return res.json() as Promise<{ text?: string }>;
       })
       .then((data) => {
-        const text = stripKeyword(data.text ?? "");
+        const text = stripKeyword(data.text ?? "", configRef.current);
         if (text) onSend(text);
         finishTurn();
       })
@@ -357,10 +377,10 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
       if (detected) setLastDetected(detected);
       const current = phaseRef.current;
       // Wake word: from armed (idle), working (safety valve), or sticky (fallback).
-      if (detected === "jarvis" && (current === "armed" || current === "working" || current === "sticky")) {
+      if (detected === "wake" && (current === "armed" || current === "working" || current === "sticky")) {
         void playAck();
         startRecording();
-      } else if (detected === "finalize" && current === "recording") {
+      } else if (detected === "stop" && current === "recording") {
         // Optional early stop — never required. Silence is the default end.
         stopAndTranscribe();
       }

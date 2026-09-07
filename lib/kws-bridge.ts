@@ -1,8 +1,12 @@
 /**
  * Keyword-spotting bridge — spawns the PocketSphinx helper
- * (`scripts/kws-helper.py`) and detects "jarvis"/"finalize" from base64 PCM
- * chunks. Mirrors the whisper/piper singletons: one long-lived child in
- * `globalThis`, with a pending-request map keyed by id.
+ * (`scripts/kws-helper.py`) and reports wake/stop phrase detection from
+ * base64 PCM chunks. Mirrors the whisper/piper singletons: one long-lived
+ * child in `globalThis`, with a pending-request map keyed by id.
+ *
+ * The wake + stop phrases come from the (hot-reloaded) voice config and are
+ * passed to the helper at spawn, so renaming them needs no rebuild. The
+ * helper reports stable labels: "wake" | "stop" | null.
  *
  * Server-only module. Only imported by the API route handler.
  */
@@ -68,9 +72,13 @@ function spawnHelper(state: KwsSingleton): void {
     return;
   }
 
-  const child = spawn(state.config.python, [state.config.helper], {
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  // Wake + stop phrases from the hot-reloaded voice config.
+  const vc = resolveVoiceConfig(loadVoiceConfigFile());
+  const child = spawn(
+    state.config.python,
+    [state.config.helper, "--wake", vc.wakeWord.phrase, "--stop", vc.stopWord.phrase],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
   state.child = child;
 
   const rl = createInterface({ input: child.stdout! });
@@ -100,7 +108,7 @@ function spawnHelper(state: KwsSingleton): void {
   });
 }
 
-/** Detect "jarvis"/"finalize" in a base64 16 kHz int16 mono PCM chunk. */
+/** Detect wake/stop phrases in a base64 16 kHz int16 mono PCM chunk. */
 export function detectKeyword(pcmBase64: string): Promise<string | null> {
   const state = ensureState();
   if (!state.child) spawnHelper(state);

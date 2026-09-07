@@ -329,7 +329,7 @@ export const zhTWLocale: LocalePlugin = {
     "chat.readAloudVoice": "語音",
     "chat.enableReadAloud": "開啟自動朗讀",
     "chat.disableReadAloud": "關閉自動朗讀",
-    "chat.enableVoiceInput": "開啟語音喚醒詞（說「jarvis」）",
+    "chat.enableVoiceInput": "启用语音唤醒词",
     "chat.disableVoiceInput": "關閉語音喚醒詞",
     "chat.dictate": "語音輸入",
     "chat.stopDictation": "停止聽寫",
