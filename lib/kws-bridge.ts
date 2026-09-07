@@ -35,6 +35,8 @@ interface Pending {
 interface KwsSingleton {
   config: KwsConfig;
   child: ChildProcess | null;
+  /** The wake/stop phrases the current child was spawned with. */
+  spawnedWith: { wake: string; stop: string } | null;
   error: string | null;
   pending: Map<string, Pending>;
   nextId: number;
@@ -49,6 +51,7 @@ function ensureState(): KwsSingleton {
     globalForKws.__kws = {
       config: resolveKwsConfig(),
       child: null,
+      spawnedWith: null,
       error: null,
       pending: new Map(),
       nextId: 0,
@@ -74,6 +77,10 @@ function spawnHelper(state: KwsSingleton): void {
 
   // Wake + stop phrases from the hot-reloaded voice config.
   const vc = resolveVoiceConfig(loadVoiceConfigFile());
+  state.spawnedWith = {
+    wake: vc.wakeWord.phrase,
+    stop: vc.stopWord.phrase,
+  };
   const child = spawn(
     state.config.python,
     [state.config.helper, "--wake", vc.wakeWord.phrase, "--stop", vc.stopWord.phrase],
@@ -104,14 +111,41 @@ function spawnHelper(state: KwsSingleton): void {
   });
   child.on("exit", () => {
     state.child = null;
+    state.spawnedWith = null;
     rejectAll(state, "KWS helper exited unexpectedly");
   });
+}
+
+/**
+ * Respawn the helper if the configured phrases changed since it was spawned
+ * (config is hot-reloaded; the child keeps its spawn-time argv otherwise).
+ */
+function ensureFreshHelper(state: KwsSingleton): void {
+  const vc = resolveVoiceConfig(loadVoiceConfigFile());
+  const cur = { wake: vc.wakeWord.phrase, stop: vc.stopWord.phrase };
+  if (!state.child) {
+    spawnHelper(state);
+  } else if (
+    !state.spawnedWith ||
+    state.spawnedWith.wake !== cur.wake ||
+    state.spawnedWith.stop !== cur.stop
+  ) {
+    rejectAll(state, "KWS helper restarting (phrases changed)");
+    try {
+      state.child.kill();
+    } catch {
+      /* ignore */
+    }
+    state.child = null;
+    state.spawnedWith = null;
+    spawnHelper(state);
+  }
 }
 
 /** Detect wake/stop phrases in a base64 16 kHz int16 mono PCM chunk. */
 export function detectKeyword(pcmBase64: string): Promise<string | null> {
   const state = ensureState();
-  if (!state.child) spawnHelper(state);
+  ensureFreshHelper(state);
   if (!state.child || !state.child.stdin?.writable) {
     return Promise.reject(new KwsError(state.error ?? "KWS helper not ready"));
   }
