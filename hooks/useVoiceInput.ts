@@ -526,8 +526,15 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
           if (cur === "sticky") {
             // Recomputed after the ambient floor update so onset uses the
             // freshest floor (preserves the pre-existing behaviour).
-            const onsetDb =
-              silenceThreshold(cfg, floorDbRef.current, sensitivityRef.current) + cfg.sticky.onsetDb;
+            //
+            // Adaptive mode keeps the documented "floor + onsetDb" separation
+            // so ambient drift can't trigger a false follow-up. Manual mode uses
+            // the gate itself: the user has already declared where speech
+            // begins, and stacking onsetDb on top made the follow-up strictly
+            // harder than the wake word — ~1.5 dB of margin for a typical
+            // correctly-set gate, which fails on inter-word dips.
+            const gate = silenceThreshold(cfg, floorDbRef.current, sensitivityRef.current);
+            const onsetDb = sensitivityRef.current.auto ? gate + cfg.sticky.onsetDb : gate;
             if (db > onsetDb) {
               onsetCountRef.current += 1;
               if (onsetCountRef.current >= ONSET_HOLD_CHUNKS) startRecording();
@@ -581,6 +588,8 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     micMode,
     setMicMode,
     devices,
+    /** The device actually being captured — null means "system default". */
+    resolvedMicDeviceId: micDeviceId,
     meterRef,
     sensitivity,
     setSensitivity,

@@ -2557,6 +2557,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               micMode={voiceInput.micMode}
               setMicMode={voiceInput.setMicMode}
               devices={voiceInput.devices}
+              resolvedMicDeviceId={voiceInput.resolvedMicDeviceId}
             />
 
             <DictationButton

@@ -17,11 +17,13 @@ interface Props {
   micMode: string;
   setMicMode: (mode: string) => void;
   devices: { deviceId: string; label: string }[];
+  /** Device actually captured; null = the platform default. */
+  resolvedMicDeviceId?: string | null;
 }
 
 /** Mic source selector for the jarvis voice input: follow-output (auto), system
  * default, or a specific device. Mirrors the DictationButton menu pattern. */
-export function VoiceMicSelector({ enabled, micMode, setMicMode, devices }: Props) {
+export function VoiceMicSelector({ enabled, micMode, setMicMode, devices, resolvedMicDeviceId }: Props) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -98,6 +100,13 @@ export function VoiceMicSelector({ enabled, micMode, setMicMode, devices }: Prop
                 </option>
               ))}
             </select>
+            {/* What the mode actually resolved to — "Automatic" alone hides
+                whether it picked AirPods or the built-in mic. */}
+            <span style={{ fontSize: 10, opacity: 0.8 }}>
+              {resolvedMicDeviceId
+                ? `Using: ${selectable.find((d) => d.deviceId === resolvedMicDeviceId)?.label || resolvedMicDeviceId.slice(0, 12)}`
+                : "Using: system default"}
+            </span>
           </label>
         </div>
       )}
