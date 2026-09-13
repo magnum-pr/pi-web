@@ -10,9 +10,9 @@
     "threshold": 1e-2
   },
   "vad": {
-    "silenceMs": 3000,
-    "volumeDb": -28.0,
-    "calibrationMarginDb": 6.0
+    "silenceMs": 4000,
+    "volumeDb": -32.0,
+    "calibrationMarginDb": 4.0
   },
   "recording": {
     "maxDurationS": 60
