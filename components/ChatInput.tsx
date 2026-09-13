@@ -2515,7 +2515,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 voiceInput.error
                   ? `Voice input error: ${voiceInput.error}`
                   : voiceInput.enabled
-                    ? `${t("chat.disableVoiceInput")} · ${voiceInput.phase}`
+                    ? `${t("chat.disableVoiceInput")} · ${voiceInput.phase}${voiceInput.endReason ? ` · last ended: ${voiceInput.endReason}` : ""}`
                     : t("chat.enableVoiceInput")
               }
               aria-label={voiceInput.enabled ? t("chat.disableVoiceInput") : t("chat.enableVoiceInput")}

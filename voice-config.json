@@ -1,16 +1,16 @@
 {
   "wakeWord": {
     "phrase": "oracle",
-    "threshold": 1e-8,
+    "threshold": 1e-08,
     "ackEnabled": true,
     "ack": "Yes?"
   },
   "stopWord": {
-    "phrase": "over",
-    "threshold": 1e-2
+    "phrase": "that's all",
+    "threshold": 0.1
   },
   "vad": {
-    "silenceMs": 4000,
+    "silenceMs": 3000,
     "volumeDb": -32.0,
     "calibrationMarginDb": 4.0
   },

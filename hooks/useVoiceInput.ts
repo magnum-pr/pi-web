@@ -36,6 +36,9 @@ export type VoiceInputPhase =
   | "transcribing" // POSTing to /api/transcribe
   | "working"; // turn sent; mic quiet until sticky re-arms after read-aloud
 
+/** Why a capture ended — surfaced in the UI so the end trigger is visible. */
+export type VoiceEndReason = "silence" | "stop-word" | "max-duration" | "off";
+
 function concat(chunks: Float32Array[]): Float32Array {
   const total = chunks.reduce((n, c) => n + c.length, 0);
   const out = new Float32Array(total);
@@ -123,6 +126,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   const [phase, setPhase] = useState<VoiceInputPhase>("idle");
   const [lastDetected, setLastDetected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [endReason, setEndReason] = useState<VoiceEndReason | null>(null);
 
   // Mic routing: "auto" = shared preference chain (AirPods → built-in →
   // system default), "output" = match the active output device, "default" =
@@ -242,6 +246,8 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     }
     if (!next) {
       clearStickyTimer();
+      // Only worth reporting if we were mid-capture.
+      if (phaseRef.current === "recording") setEndReason("off");
       recordingRef.current = [];
       gotoPhase("idle");
     }
@@ -326,7 +332,8 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     gotoPhase(configRef.current.sticky.enabled ? "working" : "armed");
   }, [gotoPhase]);
 
-  const stopAndTranscribe = useCallback(() => {
+  const stopAndTranscribe = useCallback((reason: VoiceEndReason) => {
+    setEndReason(reason);
     const chunks = recordingRef.current;
     recordingRef.current = [];
     if (chunks.length === 0) {
@@ -433,7 +440,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
         startRecording();
       } else if (detected === "stop" && current === "recording") {
         // Optional early stop — never required. Silence is the default end.
-        stopAndTranscribe();
+        stopAndTranscribe("stop-word");
       }
     } catch {
       // ignore transient KWS errors
@@ -504,12 +511,12 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
             if (db > silenceDb) lastSpeechAtRef.current = now;
             // Hard cap — a stuck recording can't run forever.
             if (recordingStartAtRef.current !== null && now - recordingStartAtRef.current > cfg.recording.maxDurationS * 1000) {
-              stopAndTranscribe();
+              stopAndTranscribe("max-duration");
               return;
             }
             // Silence auto-stop (the primary end trigger).
             if (lastSpeechAtRef.current !== null && now - lastSpeechAtRef.current > cfg.vad.silenceMs) {
-              stopAndTranscribe();
+              stopAndTranscribe("silence");
               return;
             }
             return;
@@ -585,6 +592,8 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     phase,
     lastDetected,
     error,
+    /** How the last capture ended, or null before the first one. */
+    endReason,
     micMode,
     setMicMode,
     devices,
