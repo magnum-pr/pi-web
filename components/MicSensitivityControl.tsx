@@ -21,33 +21,13 @@ interface Props {
  */
 export function MicSensitivityControl({ meter, sensitivity, setSensitivity, label }: Props) {
   const [level, setLevel] = useState<MicMeter>({ db: -60, threshold: -60, active: false });
-  const [onsetDb, setOnsetDb] = useState(6);
 
   useEffect(() => {
     const id = setInterval(() => setLevel({ ...meter.current }), 60);
     return () => clearInterval(id);
   }, [meter]);
 
-  // Sticky onset needs gate + sticky.onsetDb; fetch it so the readout below is
-  // the real number rather than a guess.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/voice-config")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { sticky?: { onsetDb?: number } } | null) => {
-        if (!cancelled && typeof d?.sticky?.onsetDb === "number") setOnsetDb(d.sticky.onsetDb);
-      })
-      .catch(() => {
-        // keep the default offset
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const speech = level.active && level.db > level.threshold;
-  // Manual mode onsets at the gate itself; adaptive adds sticky.onsetDb.
-  const onsetGate = sensitivity.auto ? level.threshold + onsetDb : level.threshold;
   // Slider is inverted so dragging right = more sensitive (lower dB gate).
   const sliderValue = -sensitivity.volumeDb;
 
@@ -94,11 +74,10 @@ export function MicSensitivityControl({ meter, sensitivity, setSensitivity, labe
         {label("chat.micSensitivityHint")}
       </span>
 
-      {/* Exact numbers — the bar alone can't distinguish "gate too strict"
-          from "the logic never ran". */}
+      {/* Live input level only — the gate and onset figures were diagnostic
+          scaffolding and just cluttered the panel. */}
       <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
-        input {level.db.toFixed(1)} dB · gate {level.threshold.toFixed(0)} dB · onset needs{" "}
-        {onsetGate.toFixed(0)} dB
+        input {level.db.toFixed(1)} dB
       </span>
 
       <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}>
