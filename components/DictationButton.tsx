@@ -197,7 +197,7 @@ export function DictationButton({
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--text-muted)" }}>
             {t("chat.dictationDevice")}
             <select
-              value={deviceId ?? ""}
+              value={deviceId}
               onChange={(e) => setDevice(e.target.value)}
               style={{
                 background: "var(--bg)",
@@ -209,6 +209,8 @@ export function DictationButton({
                 maxWidth: 220,
               }}
             >
+              <option value="auto">{t("chat.audioAutomatic")}</option>
+              <option value="default">{t("chat.outputDeviceDefault")}</option>
               {devices.map((d) => (
                 <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
               ))}

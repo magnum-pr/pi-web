@@ -347,6 +347,7 @@ export const enLocale: LocalePlugin = {
     "chat.micSensitivityHint": "Speak normally — the line marks where the mic starts listening.",
     "chat.micAutoSensitivity": "Automatically determine input sensitivity",
     "chat.micMoreSensitive": "More sensitive",
+    "chat.audioAutomatic": "Automatic (AirPods → built-in → system default)",
     "chat.thinkingUseDefault": "Use pi default",
     "chat.thinkingOff": "Reasoning off",
     "chat.thinkingMinimal": "Minimal reasoning",

@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "@/hooks/useI18n";
 import { useAudioOutputs } from "@/hooks/useAudioOutputs";
 
 interface Props {
-  /** Read-aloud on/off (the existing headphone toggle). */
+  /** Read-aloud on/off. */
   enabled: boolean;
   onToggle: () => void;
-  /** Stored output device id; "default" follows the system output. */
+  /** Stored output choice: "auto", "default", or a concrete device id. */
   sinkId: string;
   onSinkChange: (deviceId: string) => void;
-  /** False in browsers without AudioContext.setSinkId (Firefox/Safari). */
+  /** False in browsers without any setSinkId support (Safari). */
   sinkSupported: boolean;
-  label: (key: string) => string;
 }
 
 function HeadphoneIcon() {
@@ -33,9 +33,9 @@ function optionLabel(label: string, deviceId: string, index: number): string {
 /**
  * Headphone button + menu: read-aloud on/off and where the voice plays.
  *
- * Routing uses `AudioContext.setSinkId`, which is Chromium-only. On Firefox
- * and Safari the device list is replaced by a short explanation and the menu
- * still works as the read-aloud toggle.
+ * Routing uses `AudioContext.setSinkId`, falling back to
+ * `HTMLMediaElement.setSinkId`. Where neither exists (Safari) the device list
+ * is replaced by a short explanation and the menu still toggles read-aloud.
  */
 export function VoiceOutputSelector({
   enabled,
@@ -43,13 +43,14 @@ export function VoiceOutputSelector({
   sinkId,
   onSinkChange,
   sinkSupported,
-  label,
 }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { devices } = useAudioOutputs(open);
+  // Pseudo ids are represented by the explicit options below.
   const selectable = devices.filter(
-    (d) => d.deviceId !== "default" && d.deviceId !== "communications",
+    (d) => d.deviceId !== "default" && d.deviceId !== "communications" && d.deviceId !== "",
   );
 
   useEffect(() => {
@@ -66,8 +67,8 @@ export function VoiceOutputSelector({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title={enabled ? label("chat.disableReadAloud") : label("chat.enableReadAloud")}
-        aria-label={enabled ? label("chat.disableReadAloud") : label("chat.enableReadAloud")}
+        title={enabled ? t("chat.disableReadAloud") : t("chat.enableReadAloud")}
+        aria-label={enabled ? t("chat.disableReadAloud") : t("chat.enableReadAloud")}
         aria-expanded={open}
         aria-haspopup="menu"
         style={{
@@ -123,12 +124,12 @@ export function VoiceOutputSelector({
                 </svg>
               )}
             </span>
-            {label("chat.readAloudToggle")}
+            {t("chat.readAloudToggle")}
           </button>
 
           {sinkSupported ? (
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--text-muted)" }}>
-              {label("chat.outputDevice")}
+              {t("chat.outputDevice")}
               <select
                 value={sinkId}
                 onChange={(e) => onSinkChange(e.target.value)}
@@ -138,7 +139,8 @@ export function VoiceOutputSelector({
                   padding: "5px 6px", fontSize: 12, maxWidth: 240,
                 }}
               >
-                <option value="default">{label("chat.outputDeviceDefault")}</option>
+                <option value="auto">{t("chat.audioAutomatic")}</option>
+                <option value="default">{t("chat.outputDeviceDefault")}</option>
                 {selectable.map((d, i) => (
                   <option key={d.deviceId} value={d.deviceId}>
                     {optionLabel(d.label, d.deviceId, i)}
@@ -147,13 +149,13 @@ export function VoiceOutputSelector({
               </select>
               {selectable.length === 0 && (
                 <span style={{ fontSize: 10, opacity: 0.8 }}>
-                  {label("chat.outputNoDevices")}
+                  {t("chat.outputNoDevices")}
                 </span>
               )}
             </label>
           ) : (
             <span style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
-              {label("chat.outputUnsupported")}
+              {t("chat.outputUnsupported")}
             </span>
           )}
         </div>

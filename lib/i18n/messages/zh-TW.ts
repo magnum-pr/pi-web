@@ -347,6 +347,7 @@ export const zhTWLocale: LocalePlugin = {
     "chat.micSensitivityHint": "正常說話即可——直線表示麥克風開始收音的位置。",
     "chat.micAutoSensitivity": "自動判斷輸入靈敏度",
     "chat.micMoreSensitive": "更靈敏",
+    "chat.audioAutomatic": "自動（AirPods → 內建 → 系統預設）",
     "chat.thinkingUseDefault": "使用 pi 預設設定",
     "chat.thinkingOff": "關閉推理",
     "chat.thinkingMinimal": "最低程度推理",

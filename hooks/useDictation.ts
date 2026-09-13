@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { computeLevel, encodeWav, resampleTo16k } from "@/lib/audio";
+import { isPseudoDeviceId, resolveDeviceChoice } from "@/lib/audio-devices";
 
 export type DictationPhase = "idle" | "recording" | "transcribing" | "error";
 
@@ -15,7 +16,7 @@ const TARGET_SAMPLE_RATE = 16000;
 export interface DictationState {
   phase: DictationPhase;
   devices: DictationDevice[];
-  deviceId: string | null;
+  deviceId: string;
   error: string | null;
   /** Live 0..1 audio level, updated per capture chunk without re-rendering. */
   levelRef: { current: number };
@@ -36,7 +37,9 @@ export interface DictationState {
 export function useDictation(onText: (text: string) => void): DictationState {
   const [phase, setPhase] = useState<DictationPhase>("idle");
   const [devices, setDevices] = useState<DictationDevice[]>([]);
-  const [deviceId, setDeviceId] = useState<string | null>(null);
+  // "auto" = shared preference chain (AirPods → built-in → system default),
+  // "default" = system default, otherwise a manual device pin.
+  const [deviceId, setDeviceId] = useState<string>("auto");
   const [error, setError] = useState<string | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -52,13 +55,14 @@ export function useDictation(onText: (text: string) => void): DictationState {
       .enumerateDevices()
       .then((list) => {
         const inputs = list
-          .filter((d) => d.kind === "audioinput")
+          .filter((d) => d.kind === "audioinput" && !isPseudoDeviceId(d.deviceId))
           .map((d) => ({
             deviceId: d.deviceId,
             label: d.label || `Microphone ${d.deviceId.slice(0, 8)}`,
           }));
         setDevices(inputs);
-        setDeviceId((prev) => prev ?? inputs[0]?.deviceId ?? null);
+        // The choice itself is never rewritten — "auto" resolves at capture
+        // time so a device plugged in later is picked up automatically.
       })
       .catch(() => {
         // leave the previous list in place
@@ -70,9 +74,12 @@ export function useDictation(onText: (text: string) => void): DictationState {
     setError(null);
     chunksRef.current = [];
 
+    // Resolve "auto" through the shared chain; null means "no constraint", so
+    // the platform default applies — and a pseudo id is never pinned.
+    const pinned = resolveDeviceChoice(deviceId, devices);
     const constraints: MediaStreamConstraints = {
       audio: {
-        deviceId: deviceId ? { exact: deviceId } : undefined,
+        deviceId: pinned ? { exact: pinned } : undefined,
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false,
@@ -111,7 +118,7 @@ export function useDictation(onText: (text: string) => void): DictationState {
         setError(err instanceof Error ? err.message : "Microphone access failed");
         setPhase("error");
       });
-  }, [deviceId, phase, refreshDevices]);
+  }, [deviceId, devices, phase, refreshDevices]);
 
   const stop = useCallback(() => {
     if (phase !== "recording") return;

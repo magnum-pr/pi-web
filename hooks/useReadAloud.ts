@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { isPseudoDeviceId, pickPreferredDevice } from "@/lib/audio-devices";
+
 const ENABLED_KEY = "pi-read-aloud-enabled";
 const VOICE_KEY = "pi-read-aloud-voice";
 const SINK_KEY = "pi-read-aloud-sink";
@@ -35,9 +37,28 @@ function detectSinkMode(): SinkMode {
   return "none";
 }
 
-/** Map our stored sentinel onto the spec's "default" (empty string). */
-function sinkTarget(id: string): string {
-  return id === "default" ? "" : id;
+/**
+ * Apply a sink target, tolerating the two spellings browsers accept for the
+ * default output: the spec's empty string, and the historical literal
+ * "default". Without this, choosing "System default" could silently leave
+ * playback pinned to whatever device was selected before.
+ */
+async function applySink(
+  target: string,
+  setter: ((id: string) => Promise<void>) | undefined,
+): Promise<void> {
+  if (!setter) return;
+  try {
+    await setter(target);
+  } catch {
+    if (target === "") {
+      try {
+        await setter("default");
+      } catch {
+        // Unsupported sink — leave playback on the default output.
+      }
+    }
+  }
 }
 
 /** Fetch + speak + voice selection for the "read aloud" voice-output layer. */
@@ -57,14 +78,30 @@ export function useReadAloud() {
   const [voices, setVoices] = useState<string[]>([]);
   const [defaultVoice, setDefaultVoice] = useState("en_US-lessac-medium");
 
-  // Audio output routing for read-aloud (headphone menu). "default" follows
-  // the system output; a concrete id pins the chosen device.
+  // Audio output routing for read-aloud (headphone menu). "auto" applies the
+  // shared preference chain (AirPods → built-in → system default), "default"
+  // follows the system output, or a concrete id pins that device.
   const [sinkId, setSinkIdState] = useState<string>(() => {
-    if (typeof window === "undefined") return "default";
-    return localStorage.getItem(SINK_KEY) || "default";
+    if (typeof window === "undefined") return "auto";
+    return localStorage.getItem(SINK_KEY) || "auto";
   });
-  const sinkIdRef = useRef(sinkId);
+  /** Concrete sink id handed to setSinkId ("" = the default output). */
+  const sinkTargetRef = useRef<string>("");
   const sinkModeRef = useRef(detectSinkMode());
+
+  /** Resolve a stored choice into a concrete sink id. */
+  const resolveSinkTarget = useCallback(async (choice: string): Promise<string> => {
+    if (choice !== "auto") return isPseudoDeviceId(choice) ? "" : choice;
+    try {
+      const list = await navigator.mediaDevices.enumerateDevices();
+      const outputs = list
+        .filter((d) => d.kind === "audiooutput")
+        .map((d) => ({ deviceId: d.deviceId, label: d.label || "" }));
+      return pickPreferredDevice(outputs)?.deviceId ?? "";
+    } catch {
+      return "";
+    }
+  }, []);
 
   const setSinkId = useCallback((next: string) => {
     setSinkIdState(next);
@@ -88,22 +125,29 @@ export function useReadAloud() {
     } catch {
       return null;
     }
-    // Apply the pinned output before the first sound is routed.
+    // Apply the pinned output before the first sound is routed. An empty
+    // target means the default output, which needs no call at all.
     const ctx = ctxRef.current as SinkCapableContext;
-    if (ctx.setSinkId && sinkIdRef.current !== "default") {
-      void ctx.setSinkId(sinkTarget(sinkIdRef.current)).catch(() => {});
+    if (ctx.setSinkId && sinkTargetRef.current !== "") {
+      void applySink(sinkTargetRef.current, ctx.setSinkId.bind(ctx));
     }
     return ctxRef.current;
   }, []);
 
-  // Re-route the live context when the selection changes.
+  // Resolve the choice and (re-)apply it to the live context.
   useEffect(() => {
-    sinkIdRef.current = sinkId;
-    const ctx = ctxRef.current as SinkCapableContext | null;
-    if (ctx && ctx.setSinkId) {
-      void ctx.setSinkId(sinkTarget(sinkId)).catch(() => {});
-    }
-  }, [sinkId]);
+    let cancelled = false;
+    void (async () => {
+      const target = await resolveSinkTarget(sinkId);
+      if (cancelled) return;
+      sinkTargetRef.current = target;
+      const ctx = ctxRef.current as SinkCapableContext | null;
+      if (ctx) await applySink(target, ctx.setSinkId?.bind(ctx));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sinkId, resolveSinkTarget]);
 
   const unlockAudio = useCallback(() => {
     const ctx = getCtx();
@@ -210,12 +254,8 @@ export function useReadAloud() {
       finish();
       setError("Audio playback failed");
     };
-    try {
-      // This path is only taken when HTMLMediaElement.setSinkId exists.
-      await el.setSinkId(sinkTarget(sinkIdRef.current));
-    } catch {
-      // Routing rejected — fall back to the default output rather than fail.
-    }
+    // This path is only taken when HTMLMediaElement.setSinkId exists.
+    await applySink(sinkTargetRef.current, el.setSinkId.bind(el));
     try {
       await el.play();
     } catch (e) {

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "@/hooks/useI18n";
+import { isPseudoDeviceId } from "@/lib/audio-devices";
 
 function ChevronIcon() {
   return (
@@ -20,8 +22,13 @@ interface Props {
 /** Mic source selector for the jarvis voice input: follow-output (auto), system
  * default, or a specific device. Mirrors the DictationButton menu pattern. */
 export function VoiceMicSelector({ enabled, micMode, setMicMode, devices }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Pseudo ids ("default"/"communications") are represented by the explicit
+  // options below, so keep them out of the concrete device list.
+  const selectable = devices.filter((d) => !isPseudoDeviceId(d.deviceId));
 
   useEffect(() => {
     if (!open) return;
@@ -32,12 +39,14 @@ export function VoiceMicSelector({ enabled, micMode, setMicMode, devices }: Prop
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const isDevice = !(micMode === "output" || micMode === "default");
+  const isDevice = !(micMode === "auto" || micMode === "output" || micMode === "default");
   const currentLabel = isDevice
-    ? devices.find((d) => d.deviceId === micMode)?.label || "Mic…"
-    : micMode === "output"
-      ? "Follow output"
-      : "System default";
+    ? selectable.find((d) => d.deviceId === micMode)?.label || "Mic…"
+    : micMode === "auto"
+      ? "Automatic"
+      : micMode === "output"
+        ? "Follow output"
+        : "System default";
 
   return (
     <div ref={ref} style={{ position: "relative", display: "flex", alignItems: "center", flexShrink: 0 }}>
@@ -80,9 +89,10 @@ export function VoiceMicSelector({ enabled, micMode, setMicMode, devices }: Prop
                 padding: "5px 6px", fontSize: 12, maxWidth: 220,
               }}
             >
+              <option value="auto">{t("chat.audioAutomatic")}</option>
               <option value="output">Follow output (auto)</option>
               <option value="default">System default</option>
-              {devices.map((d) => (
+              {selectable.map((d) => (
                 <option key={d.deviceId} value={d.deviceId}>
                   {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
                 </option>

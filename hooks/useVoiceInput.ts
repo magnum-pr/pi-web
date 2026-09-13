@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { encodeWav, resampleTo16k } from "@/lib/audio";
-import { isPseudoDeviceId, resolveMicConstraint } from "@/lib/mic-routing";
+import { isPseudoDeviceId } from "@/lib/audio-devices";
+import { resolveMicConstraint } from "@/lib/mic-routing";
 import {
   DEFAULT_MIC_SENSITIVITY,
   clampSensitivityDb,
@@ -121,12 +122,12 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   const [lastDetected, setLastDetected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Mic routing: "output" = match the active output device (whisper-vtt hot
-  // swap), "default" = follow the system's selected input, or a concrete
-  // deviceId = manual pin. Persisted in localStorage.
+  // Mic routing: "auto" = shared preference chain (AirPods → built-in →
+  // system default), "output" = match the active output device, "default" =
+  // system default, or a concrete deviceId = manual pin. Persisted.
   const [micMode, setMicModeState] = useState<string>(() => {
-    if (typeof window === "undefined") return "output";
-    return localStorage.getItem("pi-voice-mic") || "output";
+    if (typeof window === "undefined") return "auto";
+    return localStorage.getItem("pi-voice-mic") || "auto";
   });
   const [devices, setDevices] = useState<{ deviceId: string; label: string }[]>([]);
   const [micDeviceId, setMicDeviceId] = useState<string | null>(null);

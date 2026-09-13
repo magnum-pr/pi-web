@@ -2502,10 +2502,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               <VoiceOutputSelector
                 enabled={readAloudEnabled ?? false}
                 onToggle={onReadAloudToggle}
-                sinkId={readAloudSink ?? "default"}
+                sinkId={readAloudSink ?? "auto"}
                 onSinkChange={onReadAloudSinkChange ?? (() => {})}
                 sinkSupported={readAloudSinkSupported ?? false}
-                label={t}
               />
             )}
 

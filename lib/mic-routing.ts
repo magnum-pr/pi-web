@@ -11,10 +11,9 @@
  * Pure module (no DOM, no React) — unit-testable under `node --test`.
  */
 
-export interface AudioDeviceRef {
-  deviceId: string;
-  label: string;
-}
+import { isPseudoDeviceId, resolveDeviceChoice, type AudioDeviceRef } from "./audio-devices";
+
+export type { AudioDeviceRef };
 
 function normalize(s: string): string {
   return s.trim().toLowerCase();
@@ -35,9 +34,7 @@ export function resolveMicDeviceId(
 ): string | null {
   if (inputs.length === 0) return null;
   // Ignore the "default"/"communications" pseudo-ids — pin a concrete device.
-  const concrete = inputs.filter(
-    (i) => i.deviceId && i.deviceId !== "default" && i.deviceId !== "communications",
-  );
+  const concrete = inputs.filter((i) => !isPseudoDeviceId(i.deviceId));
   const pool = concrete.length > 0 ? concrete : inputs;
 
   const outNorm = normalize(defaultOutputLabel);
@@ -73,18 +70,18 @@ export function resolveMicDeviceId(
  * `getUserMedia` as an `exact` constraint produces a stream that never
  * captures — silence in, no wake word. Returning `null` means "no
  * constraint", so the platform default applies and hot-swaps normally.
+ *
+ * `"auto"` applies the shared preference chain (AirPods → built-in).
+ * `"output"` keeps the output-paired heuristic.
  */
 export function resolveMicConstraint(
   micMode: string,
   inputs: AudioDeviceRef[],
   defaultOutputLabel: string,
 ): string | null {
-  if (micMode === "default" || micMode === "communications") return null;
+  // "output" keeps the output-paired heuristic (match the mic to whatever the
+  // audio is playing through). Everything else — "auto", "default", manual
+  // pins — goes through the shared preference chain.
   if (micMode === "output") return resolveMicDeviceId(inputs, defaultOutputLabel);
-  return micMode || null;
-}
-
-/** True for the pseudo ids that must never be pinned as an exact constraint. */
-export function isPseudoDeviceId(deviceId: string | null | undefined): boolean {
-  return !deviceId || deviceId === "default" || deviceId === "communications";
+  return resolveDeviceChoice(micMode, inputs);
 }
