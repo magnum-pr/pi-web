@@ -78,7 +78,18 @@ export function MicSensitivityControl({ meter, sensitivity, setSensitivity, labe
         <input
           type="checkbox"
           checked={sensitivity.auto}
-          onChange={(e) => setSensitivity({ auto: e.target.checked })}
+          onChange={(e) => {
+            const next = e.target.checked;
+            // Turning auto OFF seeds the slider from the gate auto was already
+            // using (the live adaptive threshold), so the switch is seamless.
+            // Without this it fell back to a hardcoded default and silently
+            // made the mic ~11 dB less sensitive in one click.
+            setSensitivity(
+              next || !level.active
+                ? { auto: next }
+                : { auto: false, volumeDb: level.threshold },
+            );
+          }}
         />
         {label("chat.micAutoSensitivity")}
       </label>

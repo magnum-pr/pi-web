@@ -22,7 +22,13 @@ export interface MicMeter {
   active: boolean;
 }
 
-export const DEFAULT_MIC_SENSITIVITY: MicSensitivity = { auto: true, volumeDb: -40 };
+/**
+ * Fallback only — the UI normally seeds the slider from the threshold auto was
+ * already using. Kept near a typical adaptive result rather than a strict
+ * value, because a strict default silently stops the mic picking up quiet
+ * speech the moment someone untickes "automatic".
+ */
+export const DEFAULT_MIC_SENSITIVITY: MicSensitivity = { auto: true, volumeDb: -50 };
 
 /** Manual threshold bounds — mirrors the volumeDb clamp in voice-config. */
 export const SENSITIVITY_MIN_DB = -70;
@@ -48,6 +54,33 @@ export function silenceThreshold(
   if (!sens.auto) return clampSensitivityDb(sens.volumeDb);
   if (floorDb === null) return cfg.vad.volumeDb;
   return Math.max(-60, Math.min(-28, floorDb + cfg.vad.calibrationMarginDb));
+}
+
+/**
+ * The value the pre-fix UI wrote the instant "automatic" was unticked, without
+ * the user touching the slider. It silently made the mic ~11 dB less sensitive
+ * — enough that normal speech stopped clearing the sticky onset gate.
+ *
+ * Exported because callers gate the one-time heal on their own migration
+ * marker: it must never be inferred from the value alone, or -40 would become
+ * impossible to choose deliberately.
+ */
+export const LEGACY_UNTICKED_DEFAULT_DB = -40;
+
+/**
+ * One-time self-heal for that artefact. Returns the default (adaptive) the
+ * first time a legacy -40 is seen, and passes everything through untouched
+ * afterwards — so -40 stays a selectable value for anyone who wants it.
+ */
+export function healLegacyMicSensitivity(
+  parsed: MicSensitivity,
+  alreadyMigrated: boolean,
+): MicSensitivity {
+  if (alreadyMigrated) return parsed;
+  if (!parsed.auto && parsed.volumeDb === LEGACY_UNTICKED_DEFAULT_DB) {
+    return DEFAULT_MIC_SENSITIVITY;
+  }
+  return parsed;
 }
 
 /**

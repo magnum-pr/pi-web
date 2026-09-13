@@ -2515,7 +2515,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 voiceInput.error
                   ? `Voice input error: ${voiceInput.error}`
                   : voiceInput.enabled
-                    ? t("chat.disableVoiceInput")
+                    ? `${t("chat.disableVoiceInput")} · ${voiceInput.phase}`
                     : t("chat.enableVoiceInput")
               }
               aria-label={voiceInput.enabled ? t("chat.disableVoiceInput") : t("chat.enableVoiceInput")}
@@ -2523,11 +2523,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 32, height: 32, padding: 0,
                 background: "none", border: "none", borderRadius: 9,
+                // Phase readout: red = capturing, amber = follow-up window open,
+                // accent = waiting for the wake word, dim = busy/idle.
                 color: voiceInput.error
                   ? "#e01a4f"
-                  : voiceInput.enabled
-                    ? (voiceInput.phase === "recording" ? "#e01a4f" : "var(--accent)")
-                    : "var(--text-dim)",
+                  : !voiceInput.enabled
+                    ? "var(--text-dim)"
+                    : voiceInput.phase === "recording"
+                      ? "#e01a4f"
+                      : voiceInput.phase === "sticky"
+                        ? "#e0a11a"
+                        : voiceInput.phase === "working"
+                          ? "var(--text-dim)"
+                          : "var(--accent)",
                 cursor: "pointer",
                 opacity: voiceInput.enabled ? 1 : 0.55,
                 transition: "background 0.12s, color 0.12s, opacity 0.12s",

@@ -7,6 +7,7 @@ import { resolveMicConstraint } from "@/lib/mic-routing";
 import {
   DEFAULT_MIC_SENSITIVITY,
   clampSensitivityDb,
+  healLegacyMicSensitivity,
   parseMicSensitivity,
   silenceThreshold,
   type MicMeter,
@@ -25,6 +26,7 @@ const AMBIENT_PERCENTILE = 0.2; // floor = 20th percentile (like whisper-vtt)
 const ONSET_HOLD_CHUNKS = 2; // consecutive speech chunks to debounce onset
 const STORAGE_KEY = "pi-voice-input-enabled";
 const SENSITIVITY_KEY = "pi-voice-sensitivity";
+const SENSITIVITY_MIGRATED_KEY = "pi-voice-sensitivity-migrated";
 
 export type VoiceInputPhase =
   | "idle" // not listening (mic off)
@@ -138,7 +140,17 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   const [sensitivity, setSensitivityState] = useState<MicSensitivity>(() => {
     if (typeof window === "undefined") return DEFAULT_MIC_SENSITIVITY;
     try {
-      return parseMicSensitivity(localStorage.getItem(SENSITIVITY_KEY));
+      const parsed = parseMicSensitivity(localStorage.getItem(SENSITIVITY_KEY));
+      // One-time heal of the legacy "unticked automatic" artefact. Gated on a
+      // marker rather than the value, so choosing -40 on purpose sticks.
+      let migrated = true;
+      try {
+        migrated = localStorage.getItem(SENSITIVITY_MIGRATED_KEY) === "1";
+        if (!migrated) localStorage.setItem(SENSITIVITY_MIGRATED_KEY, "1");
+      } catch {
+        // storage unavailable — skip the heal rather than risk clobbering
+      }
+      return healLegacyMicSensitivity(parsed, migrated);
     } catch {
       return DEFAULT_MIC_SENSITIVITY;
     }
