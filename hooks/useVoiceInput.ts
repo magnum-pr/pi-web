@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { encodeWav, resampleTo16k } from "@/lib/audio";
-import { resolveMicDeviceId } from "@/lib/mic-routing";
+import { isPseudoDeviceId, resolveMicConstraint } from "@/lib/mic-routing";
+import {
+  DEFAULT_MIC_SENSITIVITY,
+  clampSensitivityDb,
+  parseMicSensitivity,
+  silenceThreshold,
+  type MicMeter,
+  type MicSensitivity,
+} from "@/lib/mic-sensitivity";
 import { DEFAULT_VOICE_CONFIG, resolveVoiceConfig, type VoiceConfig } from "@/lib/voice-config";
 
 const TARGET_RATE = 16000;
@@ -15,6 +23,7 @@ const AMBIENT_MAX_CHUNKS = 600; // ~51s of rolling noise-floor samples
 const AMBIENT_PERCENTILE = 0.2; // floor = 20th percentile (like whisper-vtt)
 const ONSET_HOLD_CHUNKS = 2; // consecutive speech chunks to debounce onset
 const STORAGE_KEY = "pi-voice-input-enabled";
+const SENSITIVITY_KEY = "pi-voice-sensitivity";
 
 export type VoiceInputPhase =
   | "idle" // not listening (mic off)
@@ -123,6 +132,24 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   const [micDeviceId, setMicDeviceId] = useState<string | null>(null);
   const [deviceTick, setDeviceTick] = useState(0);
 
+  // Mic sensitivity override (Discord-style). Defaults to the adaptive
+  // behaviour, so an untouched install behaves exactly as before.
+  const [sensitivity, setSensitivityState] = useState<MicSensitivity>(() => {
+    if (typeof window === "undefined") return DEFAULT_MIC_SENSITIVITY;
+    try {
+      return parseMicSensitivity(localStorage.getItem(SENSITIVITY_KEY));
+    } catch {
+      return DEFAULT_MIC_SENSITIVITY;
+    }
+  });
+  const sensitivityRef = useRef(sensitivity);
+  useEffect(() => {
+    sensitivityRef.current = sensitivity;
+  }, [sensitivity]);
+
+  /** Live level/threshold for the mic menu's meter (no React churn per chunk). */
+  const meterRef = useRef<MicMeter>({ db: -60, threshold: -60, active: false });
+
   const enabledRef = useRef(enabled);
   useEffect(() => {
     enabledRef.current = enabled;
@@ -177,6 +204,22 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     }
   }, []);
 
+  const setSensitivity = useCallback((next: Partial<MicSensitivity>) => {
+    setSensitivityState((prev) => {
+      const merged: MicSensitivity = {
+        auto: next.auto ?? prev.auto,
+        volumeDb: clampSensitivityDb(next.volumeDb ?? prev.volumeDb),
+      };
+      sensitivityRef.current = merged;
+      try {
+        localStorage.setItem(SENSITIVITY_KEY, JSON.stringify(merged));
+      } catch {
+        // ignore storage errors
+      }
+      return merged;
+    });
+  }, []);
+
   const setEnabled = useCallback((next: boolean) => {
     setEnabledState(next);
     try {
@@ -208,12 +251,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
         setDevices(inputs);
         const outLabel =
           list.find((d) => d.kind === "audiooutput" && (d.deviceId === "default" || d.deviceId === "communications"))?.label || "";
-        const target =
-          micMode === "default"
-            ? "default"
-            : micMode === "output"
-              ? resolveMicDeviceId(inputs, outLabel)
-              : micMode;
+        const target = resolveMicConstraint(micMode, inputs, outLabel);
         setMicDeviceId((prev) => (prev === target ? prev : target));
       } catch {
         // leave the previous routing in place
@@ -402,9 +440,12 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
 
     (async () => {
       try {
+        // Never pin a pseudo id ("default"/"communications") — an exact
+        // constraint on one yields a stream that silently captures nothing.
+        const pinned = isPseudoDeviceId(micDeviceId) ? null : micDeviceId;
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            deviceId: micDeviceId ? { exact: micDeviceId } : undefined,
+            deviceId: pinned ? { exact: pinned } : undefined,
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,
@@ -436,15 +477,17 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
           }
 
           const db = rmsDb(data);
+          const silenceDb = silenceThreshold(cfg, floorDbRef.current, sensitivityRef.current);
+          meterRef.current = {
+            db,
+            threshold: silenceDb,
+            active: cur === "recording" || cur === "armed" || cur === "sticky",
+          };
 
           if (cur === "recording") {
             // Don't capture the ack ("Yes?") playing through the mic.
             if (!ackPlayingRef.current) recordingRef.current.push(data);
             const now = performance.now();
-            const silenceDb =
-              floorDbRef.current === null
-                ? cfg.vad.volumeDb
-                : Math.max(-60, Math.min(-28, floorDbRef.current + cfg.vad.calibrationMarginDb));
             if (db > silenceDb) lastSpeechAtRef.current = now;
             // Hard cap — a stuck recording can't run forever.
             if (recordingStartAtRef.current !== null && now - recordingStartAtRef.current > cfg.recording.maxDurationS * 1000) {
@@ -468,11 +511,10 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
           }
 
           if (cur === "sticky") {
-            const silenceDb =
-              floorDbRef.current === null
-                ? cfg.vad.volumeDb
-                : Math.max(-60, Math.min(-28, floorDbRef.current + cfg.vad.calibrationMarginDb));
-            const onsetDb = silenceDb + cfg.sticky.onsetDb;
+            // Recomputed after the ambient floor update so onset uses the
+            // freshest floor (preserves the pre-existing behaviour).
+            const onsetDb =
+              silenceThreshold(cfg, floorDbRef.current, sensitivityRef.current) + cfg.sticky.onsetDb;
             if (db > onsetDb) {
               onsetCountRef.current += 1;
               if (onsetCountRef.current >= ONSET_HOLD_CHUNKS) startRecording();
@@ -517,5 +559,17 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     };
   }, [enabled, micDeviceId, deviceTick, pollKws, gotoPhase, clearStickyTimer, startRecording, stopAndTranscribe]);
 
-  return { enabled, setEnabled, phase, lastDetected, error, micMode, setMicMode, devices };
+  return {
+    enabled,
+    setEnabled,
+    phase,
+    lastDetected,
+    error,
+    micMode,
+    setMicMode,
+    devices,
+    meterRef,
+    sensitivity,
+    setSensitivity,
+  };
 }

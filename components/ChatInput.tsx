@@ -29,6 +29,7 @@ import type { ToolPreset } from "@/lib/tool-presets";
 import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
 import { DictationButton } from "./DictationButton";
 import { VoiceMicSelector } from "./VoiceMicSelector";
+import { VoiceOutputSelector } from "./VoiceOutputSelector";
 import { DictationLevelMeter, DictationProcessing } from "./DictationLevel";
 import { useDictation } from "@/hooks/useDictation";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
@@ -84,6 +85,11 @@ interface Props {
   readAloudVoices?: string[];
   readAloudVoice?: string;
   onReadAloudVoiceChange?: (voice: string) => void;
+  /** Output device for read-aloud audio; "default" follows the system. */
+  readAloudSink?: string;
+  onReadAloudSinkChange?: (deviceId: string) => void;
+  /** False where AudioContext.setSinkId is unavailable (Firefox/Safari). */
+  readAloudSinkSupported?: boolean;
   /** Increments when the agent's spoken reply (or message) finishes — re-arms voice follow-ups. */
   voiceArmSignal?: number;
   /** True while the assistant's read-aloud is playing — mutes the voice mic so it can't hear itself. */
@@ -457,6 +463,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
   readAloudEnabled, onReadAloudToggle, readAloudVoices, readAloudVoice, onReadAloudVoiceChange,
+  readAloudSink, onReadAloudSinkChange, readAloudSinkSupported,
   voiceArmSignal = 0,
   voiceMicMuted = false,
   onPromptWithStreamingBehavior,
@@ -2492,43 +2499,36 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             )}
 
             {onReadAloudToggle !== undefined && (
-              <button
-                type="button"
-                onClick={onReadAloudToggle}
-                title={readAloudEnabled ? t("chat.disableReadAloud") : t("chat.enableReadAloud")}
-                aria-label={readAloudEnabled ? t("chat.disableReadAloud") : t("chat.enableReadAloud")}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0,
-                  background: "none", border: "none", borderRadius: 9,
-                  color: readAloudEnabled ? "var(--text-muted)" : "var(--text-dim)",
-                  cursor: "pointer",
-                  opacity: readAloudEnabled ? 1 : 0.55,
-                  transition: "background 0.12s, color 0.12s, opacity 0.12s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.opacity = "1"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = readAloudEnabled ? "var(--text-muted)" : "var(--text-dim)"; e.currentTarget.style.opacity = readAloudEnabled ? "1" : "0.55"; }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 14v-1a9 9 0 0 1 18 0v1" />
-                  <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z" />
-                  <path d="M21 14h-3a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-5z" />
-                </svg>
-              </button>
+              <VoiceOutputSelector
+                enabled={readAloudEnabled ?? false}
+                onToggle={onReadAloudToggle}
+                sinkId={readAloudSink ?? "default"}
+                onSinkChange={onReadAloudSinkChange ?? (() => {})}
+                sinkSupported={readAloudSinkSupported ?? false}
+                label={t}
+              />
             )}
 
             <button
               type="button"
               onClick={() => voiceInput.setEnabled(!voiceInput.enabled)}
-              title={voiceInput.enabled ? t("chat.disableVoiceInput") : t("chat.enableVoiceInput")}
+              title={
+                voiceInput.error
+                  ? `Voice input error: ${voiceInput.error}`
+                  : voiceInput.enabled
+                    ? t("chat.disableVoiceInput")
+                    : t("chat.enableVoiceInput")
+              }
               aria-label={voiceInput.enabled ? t("chat.disableVoiceInput") : t("chat.enableVoiceInput")}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 32, height: 32, padding: 0,
                 background: "none", border: "none", borderRadius: 9,
-                color: voiceInput.enabled
-                  ? (voiceInput.phase === "recording" ? "#e01a4f" : "var(--accent)")
-                  : "var(--text-dim)",
+                color: voiceInput.error
+                  ? "#e01a4f"
+                  : voiceInput.enabled
+                    ? (voiceInput.phase === "recording" ? "#e01a4f" : "var(--accent)")
+                    : "var(--text-dim)",
                 cursor: "pointer",
                 opacity: voiceInput.enabled ? 1 : 0.55,
                 transition: "background 0.12s, color 0.12s, opacity 0.12s",
@@ -2552,7 +2552,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               devices={voiceInput.devices}
             />
 
-            <DictationButton dictation={dictation} />
+            <DictationButton
+              dictation={dictation}
+              micSensitivity={{
+                meter: voiceInput.meterRef,
+                sensitivity: voiceInput.sensitivity,
+                setSensitivity: voiceInput.setSensitivity,
+              }}
+            />
 
             {onSoundToggle !== undefined && (
               <button

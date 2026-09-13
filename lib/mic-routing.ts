@@ -64,3 +64,27 @@ export function resolveMicDeviceId(
   // 4. First concrete input as a last resort.
   return pool[0]?.deviceId ?? null;
 }
+
+/**
+ * The deviceId `getUserMedia` should pin for a given mic mode.
+ *
+ * `"default"` (and `"communications"`) are PSEUDO device ids that
+ * `enumerateDevices` reports; they are not real devices, and passing one to
+ * `getUserMedia` as an `exact` constraint produces a stream that never
+ * captures — silence in, no wake word. Returning `null` means "no
+ * constraint", so the platform default applies and hot-swaps normally.
+ */
+export function resolveMicConstraint(
+  micMode: string,
+  inputs: AudioDeviceRef[],
+  defaultOutputLabel: string,
+): string | null {
+  if (micMode === "default" || micMode === "communications") return null;
+  if (micMode === "output") return resolveMicDeviceId(inputs, defaultOutputLabel);
+  return micMode || null;
+}
+
+/** True for the pseudo ids that must never be pinned as an exact constraint. */
+export function isPseudoDeviceId(deviceId: string | null | undefined): boolean {
+  return !deviceId || deviceId === "default" || deviceId === "communications";
+}

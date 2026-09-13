@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { DictationState } from "@/hooks/useDictation";
+import { MicSensitivityControl } from "./MicSensitivityControl";
+import type { MicMeter, MicSensitivity } from "@/lib/mic-sensitivity";
 
 export interface WhisperStatus {
   available: boolean;
@@ -31,7 +33,17 @@ function ChevronIcon() {
   );
 }
 
-export function DictationButton({ dictation }: { dictation: DictationState }) {
+export function DictationButton({
+  dictation,
+  micSensitivity,
+}: {
+  dictation: DictationState;
+  micSensitivity?: {
+    meter: { current: MicMeter };
+    sensitivity: MicSensitivity;
+    setSensitivity: (next: Partial<MicSensitivity>) => void;
+  };
+}) {
   const { t } = useI18n();
   const [status, setStatus] = useState<WhisperStatus | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -222,6 +234,18 @@ export function DictationButton({ dictation }: { dictation: DictationState }) {
               ))}
             </select>
           </label>
+
+          {micSensitivity && (
+            <>
+              <div style={{ height: 1, background: "var(--border)" }} />
+              <MicSensitivityControl
+                meter={micSensitivity.meter}
+                sensitivity={micSensitivity.sensitivity}
+                setSensitivity={micSensitivity.setSensitivity}
+                label={t}
+              />
+            </>
+          )}
         </div>
       )}
     </div>
