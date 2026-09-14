@@ -157,7 +157,7 @@ const THINKING_LEVEL_NAMES = new Set<ThinkingLevel>(["off", "minimal", "low", "m
 class PlainTextTheme extends Theme {
   constructor() {
     super(
-      { thinkingXhigh: "", searchMatchText: "" } as ConstructorParameters<typeof Theme>[0],
+      { muted: "", text: "", thinkingXhigh: "", searchMatchText: "" } as ConstructorParameters<typeof Theme>[0],
       { selectedBg: "" } as ConstructorParameters<typeof Theme>[1],
       "truecolor",
     );
