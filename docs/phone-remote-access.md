@@ -76,22 +76,39 @@ your AirPods.
 
 ## Hardening (cheap, recommended)
 
-> **Updated 2026-09-27.** The four routes below **now call
-> `isApiRequestAllowed`** (`app/api/transcribe`, `app/api/sessions`,
-> `app/api/agent/new`, `app/api/git/{status,diff}`). They were previously
-> unguarded, which made Tailnet isolation the *only* control. That mattered more
-> than it looked: `/api/sessions` serves raw transcripts, and a credential sweep
-> on 2026-09-27 found 232 live secrets in those files. An unguarded
-> `/api/sessions` was the delivery path from a local log to an external reader.
+> **Corrected 2026-09-27 (second time).** This section previously claimed
+> `/api/agent`, `/api/sessions`, `/api/git`, `/api/transcribe` were "unguarded"
+> and that the origin check "only guards a subset of routes". **That was wrong.**
+> `proxy.ts` runs on `matcher: ["/", "/api/:path*"]`, so every API route and the
+> UI root already went through `isApiRequestAllowed`. Acting on the false claim,
+> redundant per-route checks were added to four route groups; they are harmless
+> defence in depth but were never the gap.
 >
-> The guard rejects browser cross-site requests and any Host that is not
-> loopback, an IP literal, or explicitly configured. It is **not**
-> authentication — see (e).
+> `/api/sessions` does serve raw transcripts, and a credential sweep on
+> 2026-09-27 found 232 live secrets in those files — so the concern was real. The
+> actual gap was the one described below: **no password was ever configured.**
 
-Pi Web has no login. `isApiRequestAllowed` is an origin/host check, not a
-credential check, and it now covers the sensitive routes. Protection is still
-primarily **Tailnet device isolation** plus `tailscale serve`, enforced not
-assumed.
+### Pi Web has TWO gates, and only one of them is a login
+
+| Layer | What it is | Default |
+|---|---|---|
+| **Host / origin** (`isApiRequestAllowed`) | Rejects cross-site browser requests and any Host that is not loopback, an IP literal, or in `PI_WEB_ALLOWED_HOSTS`. Applied to every route by `proxy.ts`. | **always on** |
+| **Password** (`PI_WEB_PASSWORD`) | HTTP Basic Auth, fixed username `pi`, constant-time compare. Real authentication. | **off** |
+
+With no password set, **anyone who can reach the port is served in full** —
+including `/api/sessions`, which hands out session transcripts. On loopback that
+is tolerable. On a Tailnet, or bound to `0.0.0.0`, it is not.
+
+Enable the second gate:
+
+```bash
+export PI_WEB_PASSWORD='a-long-random-password'   # username is always `pi`
+```
+
+Both layers are pinned by `proxy.test.mjs` — nine tests covering 401 without
+credentials, wrong password, wrong username, every API route, and the UI root.
+Before that file existed, `web-auth.ts` had tests but the gate that uses it had
+none, and a gate that stops being applied looks identical to one that works.
 
 ### a. Lock the allowed hosts to your phone AND your hubs
 Set Pi Web env so only expected hosts are accepted:
@@ -110,10 +127,20 @@ Find device IPs via `tailscale status`. This tightens "any IP on the net" to
 ### b. Keep the Tailnet minimal
 Only your two devices. Don't share the Tailnet with other devices/people.
 
-### c. Never expose beyond the Tailnet
-- No port-forwarding on your router to 30141.
-- No `tailscale funnel`.
-- No cloud tunnel (ngrok/cloudflare) pointing at Pi Web.
+### c. Bind to LOOPBACK, not to the LAN
+
+`package.json` offers both. **Prefer the loopback one:**
+
+```bash
+npm run build && npm run start     # binds 127.0.0.1 — use this
+# npm run start:lan                # binds 0.0.0.0  — avoid
+```
+
+`tailscale serve` proxies to a local port, so the phone reaches Pi Web *through
+tailscaled* with the port never exposed on a network interface. That is strictly
+safer than `start:lan`: with `0.0.0.0`, every device on the same Wi-Fi or Tailnet
+can hit the port directly, bypassing the proxy — and any check that trusts a
+forwarded header can then be spoofed.
 
 ### d. Never expose beyond the Tailnet — and check it, don't just intend it
 - No port-forwarding on your router to 30141.
@@ -126,46 +153,40 @@ tailscale serve status     # should show ONLY the expected port
 ```
 A `funnel` entry is the failure this catches. Run it alongside the Pi Web start.
 
-### e. Real authentication — NOT YET IMPLEMENTED
+### e. Real authentication — IMPLEMENTED, NOT ENABLED
 
-Everything else in this section is a *reachability* control. None of it proves
-who is asking. Anyone holding the unlocked phone has full Pi Web, which means
-agent execution and transcript access.
+An earlier version of this section said real auth did not exist. **It does.** It
+is HTTP Basic Auth in `lib/web-auth.ts`, wired globally through `proxy.ts`, and
+covered by nine tests in `proxy.test.mjs`. It is **off** until you set a password.
 
-Until real auth exists, the controls that actually matter are:
-1. **Device lock on the phone** (Face ID / passcode) — currently the only thing
-   standing between a lost phone and full agent access.
+```bash
+export PI_WEB_PASSWORD='a-long-random-password'   # username is always `pi`
+```
+
+Then restart Pi Web. You will get a browser prompt on the phone, and the
+credential is cached for the session.
+
+**What it does and does not give you:**
+
+- It proves the caller knows the password. Over `tailscale serve` the traffic is
+  already TLS, so the credential is not exposed in transit.
+- It does **not** survive a compromised or unlocked phone: the browser remembers
+  it. Device lock is still load-bearing.
+- It does **not** replace Tailnet isolation. It is the layer that holds when
+  Tailnet isolation fails — a device you forgot to remove, or a future
+  misconfiguration.
+
+**Order that matters:** set the password *before* exposing the port. Enabling
+reachability first and auth second is how a window appears.
+
+### f. What still rests on the phone's device lock
+
+Even with the gate on, an unlocked phone in someone's hand has full Pi Web:
+agent execution, `/api/git`, and `/api/sessions` — which serves session
+transcripts. There is no second factor.
+
+The controls that carry that weight:
+1. **Device lock** (Face ID / passcode) — the only thing between a lost phone and
+   full agent access.
 2. **Tailnet membership** — remove a device the moment it is lost.
-
-Options when implementing it, cheapest first:
-- **Shared-secret header** checked by an extension, with a phone-side bookmark
-  injecting it. Weak (the secret lives on the device) but stops casual LAN access.
-- **Authenticated reverse proxy** (Caddy basic auth) in front of the port, still
-  behind `tailscale serve`.
-- **Tailscale itself** as identity — `tailscale serve` can require an identity,
-  which is the least new machinery for a solo user.
-
-Prefer the last option unless there is a reason not to: it uses the identity
-layer already in the path rather than adding one.
-
----
-
-## Operational notes
-
-- **Laptop must be on** (and Tailscale running) for the phone to reach Pi Web.
-  No laptop = no agent, regardless of phone.
-- **First call is free; the risk surface is: whatever can reach the Tailnet.**
-  If you ever join a new device to the Tailnet or the laptop hits an untrusted
-  network, re-check `tailscale status` to confirm only expected devices.
-- If the phone loses Pi Web: check the laptop is up, Tailscale running on
-  both, `tailscale serve status` shows the port, then reload the phone browser.
-
-## Verification checklist (first run)
-1. `tailscale status` on laptop → laptop + phone listed.
-2. `npm run build && npm run start:lan` on laptop → "ready".
-3. `tailscale serve --bg 30141` → prints Tailnet URL.
-4. Phone browser opens that URL, logs in, and voice round-trip works.
-5. `PI_WEB_ALLOWED_HOSTS` set to the phone IP **and** the hub's Tailnet name;
-   a request with any other Host is denied (`isApiRequestAllowed`, verified by
-   `app/api/sessions/guard.test.mjs`).
-6. `tailscale serve status` shows only port 30141 — no `funnel` entry.
+3. **`PI_WEB_ALLOWED_HOSTS`** — narrows which hosts are accepted at all.
