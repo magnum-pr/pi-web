@@ -1,0 +1,184 @@
+#!/bin/bash
+# piweb — one command to manage the pi-web server.
+#
+#   piweb            status (default)
+#   piweb restart    restart it safely
+#   piweb stop       stop it (won't come back until `piweb start`)
+#   piweb start      start it
+#   piweb logs       follow the server log
+#   piweb open       open it in a browser
+#   piweb amihosted   am I running inside the server? (restart guard)
+#
+# Why this exists: the server is managed by launchd + a supervisor loop, so
+# "just kill it and start it again" is the one thing that does NOT work — killing
+# the server from inside a pi-web session kills the session too, and a hand-run
+# `npm run dev` gets killed by the supervisor that owns the port.
+#
+# The supervisor sources ~/.pi-web.env, so it is also what applies the password.
+# `piweb stop` followed by a hand-run server therefore means NO AUTH.
+#
+# `piweb restart` REFUSES to run when invoked from inside the server itself.
+# An agent hosted by pi-web is a child of next-server, so restarting kills the
+# session mid-response — which happened twice before this guard existed.
+# Override deliberately with: piweb restart --force
+
+set -uo pipefail
+
+LABEL="com.dhavalrana.piweb"
+DOMAIN="gui/$(id -u)"
+TARGET="$DOMAIN/$LABEL"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+PORT="${PIWEB_PORT:-30141}"
+REPO="${PIWEB_APP_DIR:-$HOME/projects/pi-web}"
+ENV_FILE="${PIWEB_ENV_FILE:-$HOME/.pi-web.env}"
+
+c_ok=$'\033[32m'; c_bad=$'\033[31m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
+[ -t 1 ] || { c_ok=; c_bad=; c_dim=; c_off=; }
+
+# Source the secrets once, the same way the supervisor does. Doing it inside the
+# status function instead meant the password check ran in a subshell whose output
+# was not captured, so "with password" always reported blank.
+PI_WEB_PASSWORD=""
+PI_WEB_ALLOWED_HOSTS=""
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+fi
+
+running() { launchctl print "$TARGET" >/dev/null 2>&1; }
+pid_of()  { launchctl list 2>/dev/null | awk -v l="$LABEL" '$3==l {print $1}'; }
+port_pid(){ lsof -tnP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
+
+# Are we running INSIDE the server we are being asked to manage?
+#
+# This is not hypothetical. An agent hosted by pi-web runs as a child of
+# next-server, so `piweb restart` kills the process tree containing the agent —
+# mid-response, before it can say what happened. That has now happened twice
+# (2026-09-27, both times leaving the user with a dead server and no explanation).
+#
+# Detecting it makes the failure impossible instead of something to remember.
+hosted_by_server() {
+  local server p
+  server="$(port_pid)"
+  [ -z "$server" ] && return 1
+  p=$$
+  local i
+  for i in $(seq 1 20); do
+    p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+    case "$p" in ''|0|1) return 1 ;; esac
+    [ "$p" = "$server" ] && return 0
+  done
+  return 1
+}
+
+status() {
+  printf '\n  pi-web\n'
+  if running; then
+    printf '    state   %srunning%s  (launchd pid %s)\n' "$c_ok" "$c_off" "$(pid_of)"
+  else
+    printf '    state   %sstopped%s\n' "$c_bad" "$c_off"
+  fi
+
+  local pp; pp="$(port_pid)"
+  if [ -n "$pp" ]; then
+    printf '    port    %s  (pid %s)\n' "$PORT" "$pp"
+  else
+    printf '    port    %s  %snothing listening%s\n' "$PORT" "$c_bad" "$c_off"
+  fi
+
+  # Auth is the whole point of the supervisor, so report it, not just liveness.
+  if [ -n "$pp" ]; then
+    local an au
+    an="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$PORT/" 2>/dev/null)"
+    if [ -n "$PI_WEB_PASSWORD" ]; then
+      au="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+        -u "pi:$PI_WEB_PASSWORD" "http://127.0.0.1:$PORT/" 2>/dev/null)"
+    else
+      au="no-password-configured"
+    fi
+    if [ "$an" = "401" ]; then
+      printf '    auth    %srequired%s  (unauth %s, with password %s)\n' "$c_ok" "$c_off" "$an" "$au"
+    elif [ "$an" = "200" ]; then
+      printf '    auth    %sOPEN — no password%s  (anyone who reaches this port is served)\n' "$c_bad" "$c_off"
+    else
+      printf '    auth    unknown (HTTP %s)\n' "$an"
+    fi
+  fi
+
+  printf '    log     %s\n' "${PIWEB_LOG:-/tmp/piweb-dev.log}"
+  printf '\n'
+}
+
+case "${1:-status}" in
+  status|"")  status ;;
+
+  restart)
+    [ -x "$REPO/scripts/piweb-restart.sh" ] || { echo "  missing $REPO/scripts/piweb-restart.sh" >&2; exit 1; }
+    if hosted_by_server && [ "${2:-}" != "--force" ]; then
+      cat <<'MSG'
+
+  REFUSING to restart.
+
+  This command is running INSIDE the pi-web server (my shell is a child of
+  next-server). Restarting would kill the process tree I am running in, so the
+  restart would appear to fail and you would be left with a dead server and no
+  explanation. That has happened twice.
+
+  Restart from a normal terminal instead:
+
+      piweb restart
+
+  Or, if you genuinely want to kill this session too:
+
+      piweb restart --force
+
+MSG
+      exit 1
+    fi
+    "$REPO/scripts/piweb-restart.sh"
+    ;;
+
+  amihosted)
+    if hosted_by_server; then
+      echo "  yes — running inside pi-web (next-server pid $(port_pid))"
+      echo "  'piweb restart' from here will kill this session. Use a terminal."
+      exit 0
+    else
+      echo "  no — not a descendant of the running server"
+      exit 1
+    fi
+    ;;
+
+  start)
+    if running; then echo "  already running (pid $(pid_of))"; exit 0; fi
+    [ -f "$PLIST" ] || { echo "  missing $PLIST" >&2; exit 1; }
+    launchctl bootstrap "$DOMAIN" "$PLIST" && sleep 2 && status
+    ;;
+
+  stop)
+    if ! running; then echo "  already stopped"; exit 0; fi
+    launchctl bootout "$TARGET" && echo "  stopped."
+    echo "  ${c_bad}note${c_off}: auth comes from the supervisor. A server started by hand"
+    echo "        without $ENV_FILE will serve with NO password."
+    ;;
+
+  logs)
+    tail -n 40 -f "${PIWEB_LOG:-/tmp/piweb-dev.log}"
+    ;;
+
+  open)
+    open "http://127.0.0.1:$PORT/"
+    ;;
+
+  help|-h|--help)
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+
+  *)
+    echo "  unknown: $1" >&2
+    echo "  try: piweb [status|restart|start|stop|logs|open|amihosted]" >&2
+    exit 2
+    ;;
+esac
