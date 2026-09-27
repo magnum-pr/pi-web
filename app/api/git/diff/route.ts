@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAllowedFileRoots, isExistingFilePathAllowed, isFilePathAllowed, isWindowsAbsolutePath } from "@/lib/file-access";
 import { getGitFileDiff } from "@/lib/git-changes";
+import { isApiRequestAllowed } from "@/lib/request-security";
 
 export async function GET(request: NextRequest) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+
   try {
     const cwd = request.nextUrl.searchParams.get("cwd")?.trim() ?? "";
     const filePath = request.nextUrl.searchParams.get("path")?.trim() ?? "";

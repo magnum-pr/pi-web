@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isApiRequestAllowed } from "@/lib/request-security";
 import {
   attachSessionProjectInfo,
   listAllSessions,
@@ -13,6 +14,10 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+
   try {
     const force = new URL(req.url).searchParams.get("force") === "1";
     const [persistedSessions, runtimeSessions] = await Promise.all([

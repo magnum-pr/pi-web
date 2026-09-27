@@ -76,17 +76,36 @@ your AirPods.
 
 ## Hardening (cheap, recommended)
 
-Pi Web's API security layer (`isApiRequestAllowed`) only guards a subset of
-routes. **`/api/agent`, `/api/sessions`, `/api/git`, `/api/transcribe` have NO
-auth.** So your protection is Tailnet device isolation.
+> **Updated 2026-09-27.** The four routes below **now call
+> `isApiRequestAllowed`** (`app/api/transcribe`, `app/api/sessions`,
+> `app/api/agent/new`, `app/api/git/{status,diff}`). They were previously
+> unguarded, which made Tailnet isolation the *only* control. That mattered more
+> than it looked: `/api/sessions` serves raw transcripts, and a credential sweep
+> on 2026-09-27 found 232 live secrets in those files. An unguarded
+> `/api/sessions` was the delivery path from a local log to an external reader.
+>
+> The guard rejects browser cross-site requests and any Host that is not
+> loopback, an IP literal, or explicitly configured. It is **not**
+> authentication — see (e).
 
-### a. Lock the allowed hosts to your phone
-Set Pi Web env so only your phone's Tailscale IP is accepted:
+Pi Web has no login. `isApiRequestAllowed` is an origin/host check, not a
+credential check, and it now covers the sensitive routes. Protection is still
+primarily **Tailnet device isolation** plus `tailscale serve`, enforced not
+assumed.
+
+### a. Lock the allowed hosts to your phone AND your hubs
+Set Pi Web env so only expected hosts are accepted:
 ```bash
-export PI_WEB_ALLOWED_HOSTS="<phone-tailscale-ip>"
+export PI_WEB_ALLOWED_HOSTS="<phone-tailscale-ip>,<hub-tailscale-name>.ts.net"
 ```
-Find the phone IP via `tailscale status`. This tightens "any IP on the net"
-to "specifically my phone."
+Find device IPs via `tailscale status`. This tightens "any IP on the net" to
+"specifically these devices."
+
+> **Mobile data matters here.** On cellular the phone gets a carrier-NAT address
+> shared with strangers. The guard above is what stops that mattering; Tailscale
+> being *up* is what keeps the traffic on the Tailnet. If Tailscale drops and the
+> phone has no route back, the correct outcome is an unreachable Pi Web — never a
+> fallback to a public path.
 
 ### b. Keep the Tailnet minimal
 Only your two devices. Don't share the Tailnet with other devices/people.
@@ -96,10 +115,38 @@ Only your two devices. Don't share the Tailnet with other devices/people.
 - No `tailscale funnel`.
 - No cloud tunnel (ngrok/cloudflare) pointing at Pi Web.
 
-### d. (Future / optional) real auth in front
-If you ever want stronger-than-Tailnet assurance, put an authenticated proxy
-(Caddy with basic auth, or a shared-secret header check) in front of Pi Web,
-still served over `tailscale serve`. Not required for solo personal use.
+### d. Never expose beyond the Tailnet — and check it, don't just intend it
+- No port-forwarding on your router to 30141.
+- No `tailscale funnel`.
+- No cloud tunnel (ngrok/cloudflare) pointing at Pi Web.
+
+Make this verifiable rather than remembered:
+```bash
+tailscale serve status     # should show ONLY the expected port
+```
+A `funnel` entry is the failure this catches. Run it alongside the Pi Web start.
+
+### e. Real authentication — NOT YET IMPLEMENTED
+
+Everything else in this section is a *reachability* control. None of it proves
+who is asking. Anyone holding the unlocked phone has full Pi Web, which means
+agent execution and transcript access.
+
+Until real auth exists, the controls that actually matter are:
+1. **Device lock on the phone** (Face ID / passcode) — currently the only thing
+   standing between a lost phone and full agent access.
+2. **Tailnet membership** — remove a device the moment it is lost.
+
+Options when implementing it, cheapest first:
+- **Shared-secret header** checked by an extension, with a phone-side bookmark
+  injecting it. Weak (the secret lives on the device) but stops casual LAN access.
+- **Authenticated reverse proxy** (Caddy basic auth) in front of the port, still
+  behind `tailscale serve`.
+- **Tailscale itself** as identity — `tailscale serve` can require an identity,
+  which is the least new machinery for a solo user.
+
+Prefer the last option unless there is a reason not to: it uses the identity
+layer already in the path rather than adding one.
 
 ---
 
@@ -118,4 +165,7 @@ still served over `tailscale serve`. Not required for solo personal use.
 2. `npm run build && npm run start:lan` on laptop → "ready".
 3. `tailscale serve --bg 30141` → prints Tailnet URL.
 4. Phone browser opens that URL, logs in, and voice round-trip works.
-5. `PI_WEB_ALLOWED_HOSTS` set to phone IP; non-phone device denied.
+5. `PI_WEB_ALLOWED_HOSTS` set to the phone IP **and** the hub's Tailnet name;
+   a request with any other Host is denied (`isApiRequestAllowed`, verified by
+   `app/api/sessions/guard.test.mjs`).
+6. `tailscale serve status` shows only port 30141 — no `funnel` entry.

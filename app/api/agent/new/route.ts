@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
 import { startRpcSession } from "@/lib/rpc-manager";
+import { isApiRequestAllowed } from "@/lib/request-security";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -20,6 +21,10 @@ function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
 // type:"ensure_session" only creates the runtime so clients can query commands.
 // Returns pi's real session id plus the model/thinking state selected at startup.
 export async function POST(req: Request) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+
   let commandType: string | undefined;
   let promptAccepted = false;
   try {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { transcribeWav, WhisperError } from "@/lib/whisper-server";
+import { isApiRequestAllowed } from "@/lib/request-security";
 
 const MAX_WAV_BYTES = 50 * 1024 * 1024; // 50MB guard
 
@@ -14,6 +15,10 @@ export function isWav(bytes: Uint8Array): boolean {
 
 // POST /api/transcribe — raw WAV body (16kHz mono PCM) → { text }.
 export async function POST(req: Request) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+
   let wav: Uint8Array;
   try {
     wav = new Uint8Array(await req.arrayBuffer());
