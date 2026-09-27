@@ -48,6 +48,17 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 running() { launchctl print "$TARGET" >/dev/null 2>&1; }
+
+# PIDs of scheduled-restart sleepers.
+#
+# Must be precise. A loose grep for the label also matches any shell whose
+# command line mentions it — including the one running this script — which made
+# 'pending' report a phantom entry and 'cancel' target its own caller.
+# The sleeper's command is exactly: <...>/Python - <label> <uid> <delay>
+sleeper_pids() {
+  # shellcheck disable=SC2009
+  ps -eo pid=,command= | grep -E '/Python - com\.dhavalrana\.piweb [0-9]+ [0-9]+$' | awk '{print $1}'
+}
 pid_of()  { launchctl list 2>/dev/null | awk -v l="$LABEL" '$3==l {print $1}'; }
 port_pid(){ lsof -tnP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
 
@@ -84,24 +95,52 @@ refuse_if_hosted() {
   hosted_by_server || return 0
   cat <<MSG
 
-  REFUSING '$verb'.
+  '$verb' would kill the process tree this session lives in.
 
-  This shell is running INSIDE the pi-web server (a child of next-server pid
-  $(port_pid)). '$verb' would kill the process tree this session lives in, so it
-  would appear to fail and leave you with a dead server and no explanation.
-  That has happened twice.
+  This shell is running INSIDE pi-web (a child of next-server pid $(port_pid)).
+  Running '$verb' inline kills the server mid-response, so it looks like the
+  command failed and you are left with a dead server and no explanation. That
+  has happened twice.
 
-  Run it from a normal terminal instead (a Terminal window is not under the
-  server, so it works there):
+  Three ways forward, in order of preference:
 
-      piweb $verb
+    1. Ask the user first, then schedule it so this reply gets delivered:
 
-  Or, if you intend to kill this session too:
+           piweb restart --in 20
 
-      piweb $verb --force
+       Detached: waits 20s, THEN restarts. The conversation drops as announced
+       and resumes when the server is back. Use this when the user is on a
+       phone and cannot open a terminal.
+
+    2. Run it from a normal Terminal window (not under the server):
+
+           piweb $verb
+
+    3. Kill this session too, deliberately:
+
+           piweb $verb --force
 
 MSG
   return 1
+}
+
+# Detached restart after a delay, so a hosted agent can announce it and finish
+# replying before the process tree goes away. Double-fork + setsid: the sleeper
+# must not be a child of the server, or it dies with the thing it is restarting.
+schedule_restart() {
+  local delay="$1"
+  python3 - "$LABEL" "$(id -u)" "$delay" >/dev/null 2>&1 <<'PY' &
+import os, sys, time
+label, uid, delay = sys.argv[1], sys.argv[2], float(sys.argv[3])
+if os.fork() != 0:
+    os._exit(0)
+os.setsid()
+if os.fork() != 0:
+    os._exit(0)
+time.sleep(delay)
+os.execvp("launchctl", ["launchctl", "kickstart", "-k", f"gui/{uid}/{label}"])
+PY
+  disown 2>/dev/null || true
 }
 
 status() {
@@ -146,6 +185,23 @@ case "${1:-status}" in
   status|"")  status ;;
 
   restart)
+    # --in N: detached, delayed. The only safe way for a hosted agent to do this
+    # itself, because it lets the reply be delivered before the tree goes away.
+    if [ "${2:-}" = "--in" ]; then
+      delay="${3:-20}"
+      case "$delay" in ''|*[!0-9]*) echo "  --in needs a number of seconds, e.g. --in 20" >&2; exit 2 ;; esac
+      schedule_restart "$delay"
+      cat <<MSG
+
+  Restart scheduled in ${delay}s — detached, so it will complete even though this
+  conversation is about to drop.
+
+  Expect the page to stop responding, then come back on its own. Reopen or
+  reload it in about $((delay + 10))s, and the session will still be there.
+
+MSG
+      exit 0
+    fi
     [ -x "$REPO/scripts/piweb-restart.sh" ] || { echo "  missing $REPO/scripts/piweb-restart.sh" >&2; exit 1; }
     refuse_if_hosted restart "${2:-}" || exit 1
     "$REPO/scripts/piweb-restart.sh"
@@ -154,12 +210,38 @@ case "${1:-status}" in
   amihosted)
     if hosted_by_server; then
       echo "  yes — running inside pi-web (next-server pid $(port_pid))"
-      echo "  'piweb restart' from here will kill this session. Use a terminal."
+      echo "  'piweb restart' from here will kill this session. Use 'restart --in N'."
       exit 0
     else
       echo "  no — not a descendant of the running server"
       exit 1
     fi
+    ;;
+
+  pending)
+    # A scheduled restart is a detached process; without this, one set hours out
+    # is invisible until the server abruptly dies.
+    pids="$(sleeper_pids)"
+    if [ -z "$pids" ]; then
+      echo "  no restart scheduled"
+      exit 1
+    fi
+    echo "  scheduled restarts:"
+    for p in $pids; do
+      delay="$(ps -o command= -p "$p" 2>/dev/null | awk '{print $NF}')"
+      printf '    pid %-7s fires in %ss\n' "$p" "$delay"
+    done
+    echo "  cancel with: piweb cancel"
+    ;;
+
+  cancel)
+    pids="$(sleeper_pids)"
+    if [ -z "$pids" ]; then echo "  nothing to cancel"; exit 1; fi
+    n=0
+    for p in $pids; do kill "$p" 2>/dev/null && n=$((n + 1)); done
+    sleep 1
+    left="$(sleeper_pids | wc -l | tr -d ' ')"
+    echo "  cancelled ${n} scheduled restart(s); remaining: ${left}"
     ;;
 
   start)
@@ -185,12 +267,32 @@ case "${1:-status}" in
     ;;
 
   help|-h|--help)
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    cat <<'MSG'
+
+  piweb — manage the pi-web server
+
+    piweb                    status (default)
+    piweb restart            restart (refuses from inside the server; see below)
+    piweb restart --in 20    restart in 20s, detached — safe from inside
+    piweb pending            show a scheduled restart
+    piweb cancel             cancel a scheduled restart without restarting
+    piweb start              start
+    piweb stop               stop
+    piweb logs               follow the server log
+    piweb open               open in a browser
+    piweb amihosted          am I running inside the server?
+
+  The server is managed by launchd + a supervisor loop, so 'kill it and start it
+  again' is the one thing that does not work: killing it from inside a pi-web
+  session kills that session too. When hosted, use 'restart --in N' (announce it
+  first) or run the command from a Terminal window.
+
+MSG
     ;;
 
   *)
     echo "  unknown: $1" >&2
-    echo "  try: piweb [status|restart|start|stop|logs|open|amihosted]" >&2
+    echo "  try: piweb [status|restart|restart --in N|pending|cancel|start|stop|logs|open|amihosted]" >&2
     exit 2
     ;;
 esac
