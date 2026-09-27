@@ -64,6 +64,31 @@ Lint: `npm run lint`
 - Do not use `next dev --webpack` as a fallback. This repository's development graph can fail on `undici` imports such as `node:console`; development is expected to use Turbopack.
 - Next.js may append a generated `BEGIN:nextjs-agent-rules` block to `AGENTS.md` when `next dev` starts. Treat that as generated tooling output, verify it with `git status`, and do not include it in an unrelated feature commit.
 
+### Server lifecycle — never kill the server from inside pi-web
+
+The dev server is owned by a launchd job, `com.dhavalrana.piweb`
+(`~/Library/LaunchAgents/com.dhavalrana.piweb.plist` → `scripts/piweb-supervisor.sh`):
+
+- launchd `KeepAlive` plus a supervisor loop keep `npm run dev` running. Kill the
+  server process *or* the supervisor and it is back within ~10s; the loop also
+  clears a stale listener on :30141 so a killed server cannot orphan the port.
+- The supervisor sources `~/.pi-web.env` on every start, so `PI_WEB_PASSWORD` and
+  `PI_WEB_ALLOWED_HOSTS` are applied automatically — no manual env dance.
+
+**Do not `kill <server-pid>` to restart.** An agent's shell is a child of the
+server, so killing it kills the agent mid-task — which is exactly how the server
+(and a working session) went down on 2026-09-27. Request a restart instead:
+
+```bash
+scripts/piweb-restart.sh
+```
+
+That script double-forks into a new session before kicking the job, so the
+restart completes even though the cycle kills the caller. Two other things to
+remember: the supervisor will restart the server even if an agent kills it, and
+`next.config.ts` parses `package.json` with no try/catch, so a conflicted
+`package.json` prevents boot regardless of the supervisor.
+
 ---
 
 ## Architecture
