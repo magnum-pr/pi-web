@@ -73,6 +73,37 @@ hosted_by_server() {
   return 1
 }
 
+# Refuse when the requested verb would kill the server hosting this shell.
+#
+# Applied to EVERY verb that stops the server, not just restart: `stop` boots the
+# launchd job out, which kills the same process tree. Guarding only `restart`
+# left an identical hole one command over.
+refuse_if_hosted() {
+  local verb="$1" override="${2:-}"
+  [ "$override" = "--force" ] && return 0
+  hosted_by_server || return 0
+  cat <<MSG
+
+  REFUSING '$verb'.
+
+  This shell is running INSIDE the pi-web server (a child of next-server pid
+  $(port_pid)). '$verb' would kill the process tree this session lives in, so it
+  would appear to fail and leave you with a dead server and no explanation.
+  That has happened twice.
+
+  Run it from a normal terminal instead (a Terminal window is not under the
+  server, so it works there):
+
+      piweb $verb
+
+  Or, if you intend to kill this session too:
+
+      piweb $verb --force
+
+MSG
+  return 1
+}
+
 status() {
   printf '\n  pi-web\n'
   if running; then
@@ -116,27 +147,7 @@ case "${1:-status}" in
 
   restart)
     [ -x "$REPO/scripts/piweb-restart.sh" ] || { echo "  missing $REPO/scripts/piweb-restart.sh" >&2; exit 1; }
-    if hosted_by_server && [ "${2:-}" != "--force" ]; then
-      cat <<'MSG'
-
-  REFUSING to restart.
-
-  This command is running INSIDE the pi-web server (my shell is a child of
-  next-server). Restarting would kill the process tree I am running in, so the
-  restart would appear to fail and you would be left with a dead server and no
-  explanation. That has happened twice.
-
-  Restart from a normal terminal instead:
-
-      piweb restart
-
-  Or, if you genuinely want to kill this session too:
-
-      piweb restart --force
-
-MSG
-      exit 1
-    fi
+    refuse_if_hosted restart "${2:-}" || exit 1
     "$REPO/scripts/piweb-restart.sh"
     ;;
 
@@ -158,6 +169,7 @@ MSG
     ;;
 
   stop)
+    refuse_if_hosted stop "${2:-}" || exit 1
     if ! running; then echo "  already stopped"; exit 0; fi
     launchctl bootout "$TARGET" && echo "  stopped."
     echo "  ${c_bad}note${c_off}: auth comes from the supervisor. A server started by hand"
