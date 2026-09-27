@@ -1,5 +1,51 @@
 # Pi Web - Development Notes
 
+## Branches: what `main` and `develop` are for
+
+This repo is a **diverged fork**. `origin` (`magnum-pr/pi-web`) is ours; `labidy`
+(`LabidySabidy/pi-web`) is the upstream we occasionally take features from. Three
+lines exist and they do not share a recent ancestor:
+
+| Line | What it is |
+|---|---|
+| `main` | **Stable.** Our voice + security work. The server boots here. |
+| `develop` | **Integration surface for foreign code.** Next-release staging. |
+| `labidy/main` | Upstream's line — Live Conversation, and its own voice work. |
+
+### The rule
+
+> **`develop` is where code written against a different ancestor lands first.**
+
+That is the whole point of it. Upstream work is authored against *their* base, so
+applying it here produces conflicts and behavioural surprises — including ones
+the test suite does not catch. `main` must stay bootable, because that is the
+checkout you actually use. So:
+
+```
+labidy/main ─┐
+             ├─→ develop ──(tests pass AND you have used it)──→ main
+our work ────┘
+```
+
+- **Feature work** branches off `develop` (or `main` for a hotfix), merges back.
+- **Pulling upstream** happens on `develop`: cherry-pick or merge selectively,
+  resolve, test, then run it. Promote to `main` only after you have used it.
+- **Never merge a foreign line directly into `main`.** On 2026-09-27 an
+  `origin/main` merge into `main` produced six conflicted files and killed the
+  dev server (see the note below).
+
+### Why this is not just ceremony
+
+`next.config.ts` reads and parses `package.json` at startup **with no try/catch**:
+
+```ts
+JSON.parse(readFileSync("package.json", ...))
+```
+
+So an unresolved merge conflict in `package.json` does not fail a build — it stops
+the server from booting at all, with a parse error that does not mention git.
+Keeping `main` clean of in-progress merges is what prevents that.
+
 ## Quick Start
 
 ```bash
