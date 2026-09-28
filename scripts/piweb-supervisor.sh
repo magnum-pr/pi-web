@@ -8,8 +8,14 @@
 #   ~/Library/LaunchAgents/com.dhavalrana.piweb.plist
 #
 # launchd (KeepAlive) guarantees this script is always running; this loop
-# guarantees `npm run dev` is always running beneath it. Two layers, so a
+# guarantees the server is always running beneath it. Two layers, so a
 # kill of either one is recovered.
+#
+# Production build, not the dev server: `npm run start` serves a compiled
+# snapshot of .next/ (10 scripts / ~2.7 MB) instead of Turbopack's on-the-fly
+# dev bundle (34 scripts / ~11 MB). The phone stalled at ~1.7 MB on the dev
+# bundle — a dev artefact, not a mobile limit. To iterate on code you must
+# `npm run build` again before changes are served.
 #
 # Do NOT reimplement this by killing the server from inside pi-web — use
 # scripts/piweb-restart.sh, which detaches before kicking the job.
@@ -68,8 +74,8 @@ while true; do
       kill -9 $stale 2>/dev/null || true; }
   fi
 
-  log "starting: npm run dev"
-  npm run dev >>"$LOG_FILE" 2>&1
+  log "starting: npm run start (production build)"
+  npm run start >>"$LOG_FILE" 2>&1
   log "server exited (rc=$?); restarting in ${RESTART_DELAY}s"
   sleep "$RESTART_DELAY"
 done
