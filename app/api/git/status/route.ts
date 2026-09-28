@@ -5,7 +5,7 @@ import { getGitStatus } from "@/lib/git-changes";
 import { isApiRequestAllowed } from "@/lib/request-security";
 
 export async function GET(request: NextRequest) {
-  if (!isApiRequestAllowed(req)) {
+  if (!isApiRequestAllowed(request)) {
     return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
   }
 
