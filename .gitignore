@@ -63,3 +63,9 @@ e2e_*.mjs
 
 # throwaway voice test artifacts
 /.ks/
+
+# Piper venv lives outside the repo (see scripts/setup-voice.mjs). A venv's
+# bin/python is an absolute symlink, which Turbopack rejects during `next build`
+# ("Symlink ... points out of the filesystem root") — so a venv inside the tree
+# made production builds impossible.
+/piper/venv/
