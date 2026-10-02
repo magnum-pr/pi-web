@@ -36,11 +36,14 @@ async function loadProxy() {
 
 const { NextRequest } = await jiti.import("next/server");
 
-function request(path, { host = "localhost", authorization, origin, fetchSite } = {}) {
+function request(path, { host = "localhost", authorization, origin, fetchSite, headers: extraHeaders } = {}) {
   const headers = { host };
   if (authorization) headers.authorization = authorization;
   if (origin) headers.origin = origin;
   if (fetchSite) headers["sec-fetch-site"] = fetchSite;
+  // Extra headers (e.g. a session cookie) — without this, passing `headers` to
+  // request() was silently ignored and the assertion tested nothing.
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   // NextRequest, not Request: proxy() reads request.nextUrl.pathname, which a
   // plain Request does not expose.
   return new NextRequest(`http://${host}${path}`, { headers });
@@ -138,4 +141,74 @@ test("the root document is also gated, not just the API", async () => {
     proxy(request("/", { host: "localhost" })),
   );
   assert.equal(response.status, 401, "the UI itself must not be servable unauthenticated");
+});
+
+// --- session cookie (added with lib/web-session.ts) -------------------------
+//
+// The cookie exists so the installed iOS PWA stops re-prompting for a password
+// it cannot autofill. These assert the gate still refuses everything without a
+// valid one — the cookie must not become a bypass.
+
+async function loadSession() {
+  return jiti.import("./lib/web-session.ts");
+}
+
+test("a request with no credentials at all is still rejected", async () => {
+  const { proxy } = await loadProxy();
+  const response = withPassword("correct-horse", () => proxy(request("/")));
+  assert.equal(response.status, 401);
+});
+
+test("Basic Auth success issues a session cookie", async () => {
+  const { proxy } = await loadProxy();
+  const response = withPassword("correct-horse", () =>
+    proxy(request("/", { authorization: basic("pi", "correct-horse") })),
+  );
+  assert.notEqual(response.status, 401);
+  const cookie = response.headers.get("set-cookie") ?? "";
+  assert.match(cookie, /pi_web_session=/);
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /SameSite=Strict/);
+});
+
+test("a valid session cookie is accepted without Basic Auth", async () => {
+  const { proxy } = await loadProxy();
+  const { createSessionValue } = await loadSession();
+  const value = createSessionValue("correct-horse");
+  const response = withPassword("correct-horse", () =>
+    proxy(request("/", { headers: { cookie: `pi_web_session=${value}` } })),
+  );
+  assert.notEqual(response.status, 401);
+});
+
+test("a cookie signed with a different password is rejected", async () => {
+  const { proxy } = await loadProxy();
+  const { createSessionValue } = await loadSession();
+  const value = createSessionValue("some-other-password");
+  const response = withPassword("correct-horse", () =>
+    proxy(request("/", { headers: { cookie: `pi_web_session=${value}` } })),
+  );
+  assert.equal(response.status, 401, "rotation of PI_WEB_PASSWORD revokes sessions");
+});
+
+test("a forged cookie is rejected", async () => {
+  const { proxy } = await loadProxy();
+  const response = withPassword("correct-horse", () =>
+    proxy(request("/", { headers: { cookie: "pi_web_session=12345.forged" } })),
+  );
+  assert.equal(response.status, 401);
+});
+
+test("the mobile surface and the API are held to the same gate", async () => {
+  const { proxy } = await loadProxy();
+  for (const path of ["/m", "/api/sessions"]) {
+    const response = withPassword("correct-horse", () => proxy(request(path, { host: "localhost" })));
+    assert.equal(response.status, 401, `${path} must require auth when a password is set`);
+  }
+});
+
+test("no password configured leaves the gate open (loopback/tailnet model)", async () => {
+  const { proxy } = await loadProxy();
+  const response = withPassword(undefined, () => proxy(request("/", { host: "localhost" })));
+  assert.notEqual(response.status, 401);
 });
