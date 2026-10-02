@@ -44,21 +44,15 @@ self.addEventListener("fetch", (event) => {
   // Session data and live agent traffic must always come from the local server.
   if (url.pathname.startsWith("/api/") || url.pathname === "/sw.js") return;
 
-  // Navigations are deliberately NOT intercepted.
-  //
-  // Intercepting them with respondWith(fetch()) broke Basic Auth in the
-  // installed (standalone) PWA: fetch() RESOLVES with a 401 (that is a valid
-  // response, so .catch() never fires) and the raw 401 was handed back to the
-  // standalone shell, which has no authentication-prompt UI and simply rendered
-  // the body text "Authentication required". Safari, which handles the
-  // top-level navigation itself, prompted normally — hence the app and the
-  // browser behaving differently.
-  //
-  // Handing navigations back to the browser lets its own auth challenge
-  // handler run, so the password prompt appears. The cost is that an offline
-  // navigation no longer serves offline.html; the browser shows its own
-  // offline error instead, which is an acceptable trade for working auth.
-  if (request.mode === "navigate") return;
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request).catch(async () => {
+        const fallback = await caches.match(OFFLINE_URL);
+        return fallback ?? Response.error();
+      }),
+    );
+    return;
+  }
 
   const isStaticAsset =
     url.pathname.startsWith("/_next/static/") ||
