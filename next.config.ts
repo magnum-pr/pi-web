@@ -12,6 +12,8 @@ try {
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
+  // Do not advertise the framework and version to every caller.
+  poweredByHeader: false,
   outputFileTracingRoot: configDir,
   serverExternalPackages: [
     "undici",
@@ -47,11 +49,46 @@ const nextConfig: NextConfig = {
     "192.168.*.*",
   ],
   async headers() {
+    // Baseline hardening. Applied to every route, including static assets —
+    // these are cheap and none of them depend on auth. Deliberately NOT a
+    // strict Content-Security-Policy: this app relies on inline styles
+    // throughout (React `style` props) and a nonce-based policy is a separate,
+    // larger change. `frame-ancestors` is included because it is the
+    // clickjacking control and does not affect the app's own rendering.
+    const securityHeaders = [
+      // Stop the browser guessing a content type it was not told.
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      // Clickjacking: refuse to be framed at all. This UI can drive an agent,
+      // so a hostile frame must never be able to overlay it.
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+      // Never leak the URL (which can contain session ids) to third parties.
+      { key: "Referrer-Policy", value: "no-referrer" },
+      // The app needs none of these; deny by default.
+      { key: "Permissions-Policy", value: "camera=(), geolocation=(), payment=(), usb=()" },
+    ];
+
     return [
       {
         source: "/",
         headers: [
           { key: "Cache-Control", value: "private, no-cache, max-age=0, must-revalidate" },
+          ...securityHeaders,
+        ],
+      },
+      {
+        source: "/m",
+        headers: [
+          { key: "Cache-Control", value: "private, no-cache, max-age=0, must-revalidate" },
+          ...securityHeaders,
+        ],
+      },
+      // API responses must never be cached by a shared cache.
+      {
+        source: "/api/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store" },
+          ...securityHeaders,
         ],
       },
       {
@@ -59,13 +96,23 @@ const nextConfig: NextConfig = {
         headers: [
           { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
           { key: "Service-Worker-Allowed", value: "/" },
+          ...securityHeaders,
         ],
       },
       {
         source: "/manifest.webmanifest",
         headers: [
           { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
+          ...securityHeaders,
         ],
+      },
+      // Everything else (icons, offline page, static chunks) still gets the
+      // baseline headers rather than none. `missing` would skip routes already
+      // matched above, but Next applies all matching rules, so a plain catch-all
+      // is correct here.
+      {
+        source: "/:path*",
+        headers: securityHeaders,
       },
     ];
   },
