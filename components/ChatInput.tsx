@@ -28,6 +28,8 @@ import { useI18n } from "@/hooks/useI18n";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
 import { DictationButton } from "./DictationButton";
+import { MobileVoiceButton, type VoiceMode } from "./mobile/MobileVoiceButton";
+import { useDeadCapture } from "@/hooks/useDeadCapture";
 import { VoiceMicSelector } from "./VoiceMicSelector";
 import { VoiceOutputSelector } from "./VoiceOutputSelector";
 import { DictationLevelMeter, DictationProcessing } from "./DictationLevel";
@@ -552,6 +554,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const dictationRecording = dictation.phase === "recording";
   const dictationTranscribing = dictation.phase === "transcribing";
   const voiceInput = useVoiceInput(onSend, voiceArmSignal, voiceMicMuted);
+  // Mobile: the pill replaces the desktop strip, so it must use THIS hook
+  // instance. A second useVoiceInput would open a second mic stream and fight
+  // this one for the device.
+  const deadCapture = useDeadCapture(voiceInput.meterRef, voiceInput.phase, voiceInput.enabled);
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>(() => {
+    if (typeof window === "undefined") return "wake";
+    return localStorage.getItem("pi-mobile-voice-mode") === "hold" ? "hold" : "wake";
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("pi-mobile-voice-mode", voiceMode);
+    } catch {
+      // ignore storage errors
+    }
+  }, [voiceMode]);
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -2104,7 +2121,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
         )}
 
-        {/* Bottom bar: left | center (context) | right */}
+        {/* Bottom bar: left | center (context) | right.
+            Hidden on the mobile surface — the voice pill replaces the whole
+            strip (findings F1/F2: the desktop buried voice behind "More
+            controls"). One gate around the bar, not per-child edits. */}
+        {!isMobile && (
         <div style={{
           marginTop: 8,
           display: isMobile ? "grid" : "flex",
@@ -2657,6 +2678,32 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
 
         </div>
+        )}
+
+        {/* Mobile voice pill — the single primary control, replacing the strip
+            above. Sibling (not child) of the composer row, which is a flex
+            strip that collapses to zero width on a narrow viewport. */}
+        {isMobile && (
+          <MobileVoiceButton
+            phase={voiceInput.phase}
+            enabled={voiceInput.enabled}
+            dead={deadCapture.dead}
+            mode={voiceMode}
+            onModeChange={setVoiceMode}
+            onToggle={() => {
+              // Clear a latched dead state first so tap is a real retry.
+              deadCapture.clear();
+              voiceInput.setEnabled(!voiceInput.enabled);
+            }}
+            onHoldStart={() => {
+              deadCapture.clear();
+              if (!voiceInput.enabled) voiceInput.setEnabled(true);
+            }}
+            onHoldEnd={() => {
+              if (voiceInput.enabled) voiceInput.setEnabled(false);
+            }}
+          />
+        )}
       </div>
     </div>
   );
