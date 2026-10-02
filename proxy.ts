@@ -39,4 +39,7 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/", "/api/:path*"] };
+// `"/"` alone matches ONLY the root path — it is not a prefix match. `/m` (the
+// mobile surface) therefore has to be listed explicitly, or the mobile shell is
+// served unauthenticated while `/` and `/api/*` stay protected.
+export const config = { matcher: ["/", "/m", "/api/:path*"] };
