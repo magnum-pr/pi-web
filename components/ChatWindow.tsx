@@ -382,12 +382,24 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   }, []);
 
   // Auto read-aloud: speak the latest assistant message when a prompt completes.
+  //
+  // The effect must not re-run while an utterance is in flight: `speak()` calls
+  // `stop()` on entry (see useReadAloud), so a re-fire cancels playback that has
+  // only just started. That is why the wake "ack" was audible on the phone but
+  // the reply summary was not — the ack is played by useVoiceInput and never
+  // goes through this effect, while the summary is cancelled by its own re-run.
+  // `speaking` is therefore a hard dependency: while true, the effect returns
+  // early and cannot cancel the utterance it started.
   const readAloudEnabled = readAloud.enabled;
   const readAloudSpeak = readAloud.speak;
+  const readAloudSpeaking = readAloud.speaking;
   const prevAgentRunningRef = useRef(agentRunning);
   useEffect(() => {
     const wasRunning = prevAgentRunningRef.current;
     prevAgentRunningRef.current = agentRunning;
+    // Guard against the effect re-firing mid-utterance. Without this the
+    // read-aloud we just started is stopped by the next run of this effect.
+    if (readAloudSpeaking) return;
     if (wasRunning && !agentRunning) {
       // Run finished. Don't auto-read a turn the user aborted.
       const aborted = readAloudAbortedRef.current;
@@ -407,7 +419,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       // New run starts; clear any stale abort flag.
       readAloudAbortedRef.current = false;
     }
-  }, [agentRunning, messages, completionNotificationsEnabled, readAloudEnabled, readAloudSpeak]);
+  }, [agentRunning, messages, completionNotificationsEnabled, readAloudEnabled, readAloudSpeak, readAloudSpeaking]);
 
   // After the spoken reply finishes playing, re-arm voice follow-ups.
   const prevReadAloudSpeakingRef = useRef(false);
