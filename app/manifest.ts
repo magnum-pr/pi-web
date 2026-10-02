@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Pi Web",
     short_name: "Pi Web",
     description: "Local web interface for the pi coding agent",
-    start_url: "/",
+    start_url: "/m",
     scope: "/",
     display: "standalone",
     background_color: "#1a1a1a",
