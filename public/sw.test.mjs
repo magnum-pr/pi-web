@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const listeners = new Map();
@@ -145,4 +146,36 @@ test("notification click opens a window and rejects cross-origin targets", async
   await event.pending;
 
   assert.deepEqual(opened, ["https://pi.test/"]);
+});
+
+// --- Basic Auth in the installed PWA --------------------------------------
+//
+// Intercepting navigations with respondWith(fetch()) broke the password prompt
+// in the standalone PWA: fetch() RESOLVES with a 401 (so .catch() never fires),
+// and the raw 401 reached the standalone shell, which has no auth-prompt UI and
+// rendered the body text instead. Safari prompted normally because it handles
+// the top-level navigation itself.
+//
+// The fix is to NOT intercept navigations, so the browser runs its own auth
+// challenge handler. Read as source: sw.js is also *executed* above, and
+// asserting on behaviour there would not prove this wiring.
+
+const swSource = await readFile(new URL("./sw.js", import.meta.url), "utf8");
+
+test("the service worker does not intercept navigations", () => {
+  assert.match(swSource, /if \(request\.mode === "navigate"\) return;/);
+});
+
+test("no respondWith is wired to navigation requests", () => {
+  const navBlock = /if \(request\.mode === "navigate"\) \{[\s\S]{0,400}?\n  \}/.exec(swSource);
+  assert.equal(
+    navBlock,
+    null,
+    "navigations must fall through to the browser, not be served by the worker",
+  );
+});
+
+test("the API is still excluded from the worker", () => {
+  const apiExcluded = /url\.pathname\.startsWith\("\/api\/"\)/.test(swSource);
+  assert.ok(apiExcluded, "the worker must not touch /api/* — session data and agent traffic stay on the network");
 });
