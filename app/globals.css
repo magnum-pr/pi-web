@@ -1358,6 +1358,13 @@ span.token.table {
   .chat-stats-center {
     display: none !important;
   }
+  /* Per-turn metrics (in/out/cache R/$cost). Desktop affordance only: on a
+     phone they cost a line per tool call and displace the conversation
+     itself (finding F4). CSS rather than useIsMobile per row — MessageView
+     renders once per message and a matchMedia subscription each is wasteful. */
+  .message-usage {
+    display: none !important;
+  }
   .sidebar-container {
     position: fixed !important;
     top: 0;

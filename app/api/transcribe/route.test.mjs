@@ -8,7 +8,8 @@ const jiti = createJiti(import.meta.url, {
   moduleCache: false,
 });
 
-const { isWav, POST } = await jiti.import("./route.ts");
+const { isWav } = await jiti.import("@/lib/wav.ts");
+const { POST } = await jiti.import("./route.ts");
 
 function makeWavHeader() {
   const bytes = new Uint8Array(44);

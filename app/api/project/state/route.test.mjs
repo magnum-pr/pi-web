@@ -11,7 +11,7 @@ const jiti = createJiti(import.meta.url, {
   moduleCache: false,
 });
 
-const { readProjectStateFromDir } = await jiti.import("./route.ts");
+const { readProjectStateFromDir } = await jiti.import("@/lib/project-state-reader.ts");
 const routeSrc = await readFile(new URL("./route.ts", import.meta.url), "utf8");
 
 // ============================================================================

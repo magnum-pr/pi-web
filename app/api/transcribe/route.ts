@@ -1,17 +1,9 @@
 import { NextResponse } from "next/server";
 import { transcribeWav, WhisperError } from "@/lib/whisper-server";
 import { isApiRequestAllowed } from "@/lib/request-security";
+import { isWav } from "@/lib/wav";
 
 const MAX_WAV_BYTES = 50 * 1024 * 1024; // 50MB guard
-
-/** True when `bytes` starts with a RIFF/WAVE header. */
-export function isWav(bytes: Uint8Array): boolean {
-  return (
-    bytes.length >= 12 &&
-    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && // "RIFF"
-    bytes[8] === 0x57 && bytes[9] === 0x41 && bytes[10] === 0x56 && bytes[11] === 0x45 // "WAVE"
-  );
-}
 
 // POST /api/transcribe — raw WAV body (16kHz mono PCM) → { text }.
 export async function POST(req: Request) {

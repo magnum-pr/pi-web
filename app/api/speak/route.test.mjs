@@ -8,7 +8,8 @@ const jiti = createJiti(import.meta.url, {
   moduleCache: false,
 });
 
-const { buildSummarizePrompt, POST } = await jiti.import("./route.ts");
+const { buildSummarizePrompt } = await jiti.import("@/lib/speech-summary.ts");
+const { POST } = await jiti.import("./route.ts");
 
 const HOST = "localhost:30141";
 
