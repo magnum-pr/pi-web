@@ -605,6 +605,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     let ctx: AudioContext | null = null;
     let node: ScriptProcessorNode | null = null;
     let timer: ReturnType<typeof setInterval> | null = null;
+    let visibilityCleanup: (() => void) | null = null;
 
     (async () => {
       try {
@@ -708,6 +709,25 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
         timer = setInterval(() => {
           void pollKws();
         }, KWS_POLL_MS);
+
+        // iOS suspends an AudioContext when the app is backgrounded (lock the
+        // phone, switch apps, take a call). A suspended context delivers no
+        // `onaudioprocess` callbacks, so the rolling buffer freezes, the wake
+        // word stops being detected, and nothing here recovers it — the only
+        // thing that did was rebuilding the graph, i.e. the owner's toggle.
+        //
+        // Re-resume on every return to the foreground. `resume()` is
+        // idempotent when already running, so this is safe to call
+        // unconditionally.
+        const onVisibility = () => {
+          if (document.visibilityState !== "visible") return;
+          const c = ctxRef.current;
+          if (c && c.state !== "running") void c.resume().catch(() => {});
+        };
+        document.addEventListener("visibilitychange", onVisibility);
+        // Keep a handle so the cleanup below can remove it.
+        visibilityCleanup = () => document.removeEventListener("visibilitychange", onVisibility);
+
         gotoPhase("armed");
         setError(null);
       } catch (err) {
@@ -718,6 +738,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
+      visibilityCleanup?.();
       if (node) node.disconnect();
       if (stream) stream.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
