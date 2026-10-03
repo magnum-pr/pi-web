@@ -71,3 +71,109 @@ test("controls meet the 44pt minimum touch target", () => {
   const minHeights = drawerSource.match(/minHeight:\s*44/g) ?? [];
   assert.ok(minHeights.length >= 4, `expected several 44pt targets, found ${minHeights.length}`);
 });
+
+// ---------------------------------------------------------------------------
+// Sections + the expanded settings surface
+// ---------------------------------------------------------------------------
+
+test("the controls are grouped into labelled sections, not one flat list", () => {
+  // Four sections, each addressable, each with a visible text header. A flat
+  // list is what made the previous drawer's ordering arbitrary.
+  assert.match(drawerSource, /data-mobile-settings-section=\{section\}/, "sections must carry an addressable marker");
+  for (const section of ["model", "audio", "voice", "advanced"]) {
+    assert.match(
+      drawerSource,
+      new RegExp(`section="${section}"`),
+      `missing the ${section} section`,
+    );
+  }
+  assert.match(drawerSource, /<Section\b/, "sections must render through one header component, not ad-hoc markup");
+});
+
+test("reasoning sits directly beneath model, in the same section", () => {
+  const model = drawerSource.indexOf("data-mobile-settings-model");
+  const reasoning = drawerSource.indexOf("data-mobile-settings-reasoning");
+  const audio = drawerSource.indexOf('section="audio"');
+  assert.ok(model > -1 && reasoning > -1 && audio > -1, "expected all three markers to exist");
+  // Model → Reasoning, and nothing from the next section in between.
+  assert.ok(model < reasoning, "reasoning must follow model");
+  assert.ok(reasoning < audio, "reasoning must stay in the model section, not leak into audio");
+});
+
+test("the drawer can choose the output device, where the platform supports it", () => {
+  assert.match(drawerSource, /data-mobile-settings-sink/);
+  assert.match(drawerSource, /onReadAloudSinkChange/);
+  // Gated on the feature flag the caller already computes — the row must be
+  // absent rather than broken where setSinkId is unavailable (iOS/Safari).
+  assert.match(drawerSource, /readAloudSinkSupported/);
+  assert.match(drawerSource, /useAudioOutputs\(\s*open\s*\)/);
+});
+
+test("hands-free listening can be switched from the drawer", () => {
+  // F12: the wake-word on/off state had no phone control at all.
+  assert.match(drawerSource, /data-mobile-settings-voiceenabled/);
+  assert.match(drawerSource, /onVoiceEnabledChange/);
+});
+
+test("microphone source is selectable from the drawer", () => {
+  assert.match(drawerSource, /data-mobile-settings-mic/);
+  assert.match(drawerSource, /micMode/);
+  assert.match(drawerSource, /onMicModeChange/);
+  // The resolved device is shown, not just the mode label — "Automatic" alone
+  // hides whether it picked the AirPods or the built-in mic.
+  assert.match(drawerSource, /resolvedMicDeviceId/);
+});
+
+test("input sensitivity reuses the existing control, mounted only while open", () => {
+  assert.match(drawerSource, /data-mobile-settings-sensitivity/);
+  assert.match(drawerSource, /MicSensitivityControl/);
+  // The meter polls at ~16fps; it must not run while the drawer is closed.
+  assert.match(drawerSource, /\{open &&/, "body must be gated on open so the meter does not poll while closed");
+});
+
+test("file-level voice values are editable, but only through the override file", () => {
+  // Wake/stop phrase, VAD window and the recording cap live in the server voice
+  // config; the drawer patches this machine's override, never the tracked file.
+  for (const key of ["wakeword", "stopphrase", "silence", "maxduration", "lapse"]) {
+    assert.match(
+      drawerSource,
+      new RegExp(`data-mobile-settings-advanced="${key}"`),
+      `missing the editable ${key} row`,
+    );
+  }
+  assert.match(drawerSource, /onVoiceConfigChange/);
+  assert.match(drawerSource, /voiceConfig/);
+  // Text edits must not fire a request per keystroke.
+  assert.match(drawerSource, /onBlur=/, "phrase edits must commit on blur, not on every keystroke");
+});
+
+test("the Advanced block is collapsed by default, and opens in place", () => {
+  // The settings a phone user touches once must not push the everyday controls
+  // off the first screen — that is what made Advanced the longest section.
+  // A disclosure ROW, not a collapsed section: one boolean, and the other
+  // sections keep their always-visible headers.
+  assert.match(drawerSource, /data-mobile-settings-advanced-toggle="true"/);
+  assert.match(drawerSource, /advancedOpen/, "the disclosure must be real state, not a CSS hide");
+  // Collapsed by default: the initial value is false, never true.
+  assert.match(drawerSource, /useState\(\s*false\s*\)/, "Advanced must start collapsed");
+  // aria-expanded so the state is not conveyed by the chevron alone.
+  assert.match(drawerSource, /aria-expanded=\{advancedOpen/);
+});
+
+test("the collapsed Advanced rows are not rendered, so no hidden control is tabbable", () => {
+  // `hidden` alone still leaves focusable inputs in the a11y tree on some
+  // browsers; not rendering them is the only reliable answer.
+  assert.match(drawerSource, /\{advancedOpen &&/);
+});
+
+test("a failed config save is reported, not swallowed", () => {
+  assert.match(drawerSource, /voiceConfigError/);
+  assert.match(drawerSource, /data-mobile-settings-advanced-error/);
+});
+
+test("the drawer never touches the filesystem itself", () => {
+  // The write path lives behind /api/voice-config. The UI must not import fs or
+  // name a config path — if it does, the override-file boundary has been crossed.
+  assert.doesNotMatch(drawerSource, /^import .*(node:fs|"fs")/m, "the drawer must not import fs");
+  assert.doesNotMatch(drawerSource, /writeFileSync|writeFile\b/, "the drawer must not write files");
+});

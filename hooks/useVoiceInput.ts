@@ -14,6 +14,7 @@ import {
   type MicSensitivity,
 } from "@/lib/mic-sensitivity";
 import { DEFAULT_VOICE_CONFIG, resolveVoiceConfig, type VoiceConfig } from "@/lib/voice-config";
+import type { VoiceConfigPatch } from "@/lib/voice-config-store";
 
 const TARGET_RATE = 16000;
 const ROLLING_SECONDS = 2;
@@ -221,6 +222,17 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   const recordingRef = useRef<Float32Array[]>([]);
   const kwsInFlightRef = useRef(false);
   const configRef = useRef<VoiceConfig>(DEFAULT_VOICE_CONFIG);
+  /**
+   * The resolved voice config the pipeline is actually using, in React state.
+   *
+   * `configRef` remains the hot path (read per audio chunk, never causing a
+   * render); this mirror exists so the settings drawer can show which wake/stop/
+   * VAD window is live — the single most useful diagnostic for finding F16.
+   */
+  const [config, setConfig] = useState<VoiceConfig>(DEFAULT_VOICE_CONFIG);
+  /** Set while a config patch is in flight, so the drawer can disable its inputs. */
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mutedRef = useRef(false);
@@ -297,16 +309,32 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   }, [clearStickyTimer, gotoPhase]);
 
   // Output-paired mic routing + hot-swap on device change.
+  //
+  // The permission call here is a *fallback*, not the normal path. Browsers
+  // blank every device label until the origin holds a mic grant, so labels are
+  // needed to resolve "follow output" — but `getUserMedia` is only reached when
+  // the labels are genuinely empty. Calling it unconditionally made every
+  // enabled/micMode change fire a fresh permission request, which is the
+  // "asked again" behaviour on iOS: once the grant exists, enumerateDevices
+  // alone returns populated labels and no prompt appears.
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     const run = async () => {
       let perm: MediaStream | null = null;
       try {
-        // Grant permission first so device labels are populated.
-        perm = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const hasLabels = (list: MediaDeviceInfo[]) =>
+          list.some((d) => d.kind === "audioinput" && d.label !== "");
+
+        let list = await navigator.mediaDevices.enumerateDevices();
+        if (!hasLabels(list)) {
+          // Labels withheld — the origin has no live grant. Ask once, release.
+          perm = await navigator.mediaDevices.getUserMedia({ audio: true });
+          if (cancelled) return;
+          list = await navigator.mediaDevices.enumerateDevices();
+        }
         if (cancelled) return;
-        const list = await navigator.mediaDevices.enumerateDevices();
+
         const inputs = list
           .filter((d) => d.kind === "audioinput")
           .map((d) => ({ deviceId: d.deviceId, label: d.label || "" }));
@@ -471,15 +499,24 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   }, [armSignal, armSticky]);
 
   // Config fetch + hot reload.
+  //
+  // Runs whether or not listening is enabled: the settings drawer shows the
+  // resolved wake/stop/VAD window, and a mic that is switched off still needs to
+  // report the config it would use. Fetching only while `enabled` made the
+  // drawer display the built-in defaults instead of the real file — a silent
+  // wrong number in exactly the place F16 needs truth.
   useEffect(() => {
-    if (!enabled) return;
     let cancelled = false;
     const loadConfig = async () => {
       try {
         const res = await fetch("/api/voice-config");
         if (!res.ok) return;
         const data = (await res.json()) as unknown;
-        if (!cancelled) configRef.current = resolveVoiceConfig(data);
+        if (!cancelled) {
+          const resolved = resolveVoiceConfig(data);
+          configRef.current = resolved;
+          setConfig(resolved);
+        }
       } catch {
         // keep current config on transient failure
       }
@@ -490,7 +527,36 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
       cancelled = true;
       clearInterval(timer);
     };
-  }, [enabled]);
+  }, []);
+
+  /**
+   * Patch this machine's voice-config override.
+   *
+   * Writes through `/api/voice-config`, which targets the machine-local
+   * override beside the agent dir — never the repo's tracked config file. The route
+   * clamps out-of-range values, so the response is authoritative and is applied
+   * locally rather than reloaded.
+   */
+  const patchConfig = useCallback(async (patch: VoiceConfigPatch) => {
+    setConfigSaving(true);
+    setConfigError(null);
+    try {
+      const res = await fetch("/api/voice-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = (await res.json().catch(() => ({}))) as { config?: unknown; error?: string };
+      if (!res.ok) throw new Error(data.error || `Save failed (${res.status})`);
+      const resolved = resolveVoiceConfig(data.config ?? {});
+      configRef.current = resolved;
+      setConfig(resolved);
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setConfigSaving(false);
+    }
+  }, []);
 
   const pollKws = useCallback(async () => {
     if (mutedRef.current) {
@@ -690,5 +756,10 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     meterRef,
     sensitivity,
     setSensitivity,
+    /** The resolved voice config, for display and editing (settings drawer). */
+    config,
+    patchConfig,
+    configSaving,
+    configError,
   };
 }
