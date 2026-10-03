@@ -27,6 +27,18 @@ const ONSET_HOLD_CHUNKS = 2; // consecutive speech chunks to debounce onset
 const STORAGE_KEY = "pi-voice-input-enabled";
 const SENSITIVITY_KEY = "pi-voice-sensitivity";
 const SENSITIVITY_MIGRATED_KEY = "pi-voice-sensitivity-migrated";
+/**
+ * Browser-local override for the sticky follow-up window.
+ *
+ * Sticky is server-side config with no UI on any surface. The owner wants it
+ * switchable from the phone only, and desktop must not change with it — so this
+ * is a local preference layered over the server value rather than a write to
+ * the server's config file.
+ *
+ * Absent means "follow the server config", which keeps any existing install
+ * behaving exactly as before until the user touches the toggle.
+ */
+const STICKY_OVERRIDE_KEY = "pi-voice-sticky-enabled";
 
 export type VoiceInputPhase =
   | "idle" // not listening (mic off)
@@ -163,6 +175,37 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   useEffect(() => {
     sensitivityRef.current = sensitivity;
   }, [sensitivity]);
+
+  // Browser-local sticky override: null = follow server config.
+  const [stickyOverride, setStickyOverrideState] = useState<boolean | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem(STICKY_OVERRIDE_KEY);
+      return raw === null ? null : raw === "true";
+    } catch {
+      return null;
+    }
+  });
+  const stickyOverrideRef = useRef(stickyOverride);
+  useEffect(() => {
+    stickyOverrideRef.current = stickyOverride;
+  }, [stickyOverride]);
+
+  const setStickyEnabled = useCallback((next: boolean) => {
+    setStickyOverrideState(next);
+    stickyOverrideRef.current = next;
+    try {
+      localStorage.setItem(STICKY_OVERRIDE_KEY, String(next));
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  /** Effective sticky setting: the local override wins when set. */
+  const stickyEnabled = useCallback(() => {
+    const override = stickyOverrideRef.current;
+    return override === null ? configRef.current.sticky.enabled : override;
+  }, []);
 
   /** Live level/threshold for the mic menu's meter (no React churn per chunk). */
   const meterRef = useRef<MicMeter>({ db: -60, threshold: -60, active: false });
@@ -355,8 +398,8 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   // After a turn is sent (or aborted), sit quiet in `working` if sticky is on
   // (awaiting the read-aloud-complete re-arm), else return to wake-word-only.
   const finishTurn = useCallback(() => {
-    gotoPhase(configRef.current.sticky.enabled ? "working" : "armed");
-  }, [gotoPhase]);
+    gotoPhase(stickyEnabled() ? "working" : "armed");
+  }, [gotoPhase, stickyEnabled]);
 
   const stopAndTranscribe = useCallback((reason: VoiceEndReason) => {
     setEndReason(reason);
@@ -411,7 +454,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   // finishes (or the message completes if read-aloud is off).
   const armSticky = useCallback(() => {
     const cfg = configRef.current;
-    if (!enabledRef.current || !cfg.sticky.enabled) return;
+    if (!enabledRef.current || !stickyEnabled()) return;
     const cur = phaseRef.current;
     if (cur === "recording" || cur === "transcribing") return;
     clearStickyTimer();
@@ -421,7 +464,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     stickyTimerRef.current = setTimeout(() => {
       if (phaseRef.current === "sticky") gotoPhase("armed");
     }, cfg.sticky.lapseS * 1000);
-  }, [clearStickyTimer, gotoPhase]);
+  }, [clearStickyTimer, gotoPhase, stickyEnabled]);
 
   useEffect(() => {
     if (armSignal > 0) armSticky();
@@ -636,6 +679,9 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     /** Hold-to-talk: press starts a capture, release sends it. */
     beginHold,
     endHold,
+    /** Effective sticky follow-up setting (browser override wins). */
+    stickyEnabled: stickyEnabled(),
+    setStickyEnabled,
     micMode,
     setMicMode,
     devices,

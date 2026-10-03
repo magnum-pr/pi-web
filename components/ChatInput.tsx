@@ -29,6 +29,7 @@ import type { ToolPreset } from "@/lib/tool-presets";
 import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
 import { DictationButton } from "./DictationButton";
 import { MobileVoiceButton, type VoiceMode } from "./mobile/MobileVoiceButton";
+import { MobileSettingsDrawer, type MobileSettingsModelOption } from "./mobile/MobileSettingsDrawer";
 import { useDeadCapture } from "@/hooks/useDeadCapture";
 import { VoiceMicSelector } from "./VoiceMicSelector";
 import { VoiceOutputSelector } from "./VoiceOutputSelector";
@@ -562,6 +563,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (typeof window === "undefined") return "wake";
     return localStorage.getItem("pi-mobile-voice-mode") === "hold" ? "hold" : "wake";
   });
+  // Right-hand settings drawer (mobile only). Opened from the header's ⚙.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     try {
       localStorage.setItem("pi-mobile-voice-mode", voiceMode);
@@ -2684,30 +2687,85 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             above. Sibling (not child) of the composer row, which is a flex
             strip that collapses to zero width on a narrow viewport. */}
         {isMobile && (
-          <MobileVoiceButton
-            phase={voiceInput.phase}
-            enabled={voiceInput.enabled}
-            dead={deadCapture.dead}
-            mode={voiceMode}
-            onModeChange={setVoiceMode}
-            onToggle={() => {
-              // Clear a latched dead state first so tap is a real retry.
-              deadCapture.clear();
-              voiceInput.setEnabled(!voiceInput.enabled);
-            }}
-            onHoldStart={() => {
-              // Capture gesture, not a power gesture (F17). `beginHold` starts a
-              // real recording; the old handler flipped the persistent power
-              // flag, which only armed the wake word and latched the mic on.
-              deadCapture.clear();
-              voiceInput.beginHold();
-            }}
-            onHoldEnd={() => {
-              voiceInput.endHold();
-            }}
-          />
+          <div style={{ display: "flex", alignItems: "stretch" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <MobileVoiceButton
+                phase={voiceInput.phase}
+                enabled={voiceInput.enabled}
+                dead={deadCapture.dead}
+                mode={voiceMode}
+                onModeChange={setVoiceMode}
+                onToggle={() => {
+                  // Clear a latched dead state first so tap is a real retry.
+                  deadCapture.clear();
+                  voiceInput.setEnabled(!voiceInput.enabled);
+                }}
+                onHoldStart={() => {
+                  // Capture gesture, not a power gesture (F17). `beginHold` starts a
+                  // real recording; the old handler flipped the persistent power
+                  // flag, which only armed the wake word and latched the mic on.
+                  deadCapture.clear();
+                  voiceInput.beginHold();
+                }}
+                onHoldEnd={() => {
+                  voiceInput.endHold();
+                }}
+              />
+            </div>
+            {/* ⚙ opener. A button, never an edge swipe: the left edge already
+                owns the session drawer's gesture, and iOS claims part of that
+                edge in a browser tab, so a second competable gesture would only
+                open sometimes. */}
+            <button
+              type="button"
+              data-mobile-settings-toggle="true"
+              aria-label="Open settings"
+              aria-expanded={settingsOpen}
+              onClick={() => setSettingsOpen(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 52,
+                flexShrink: 0,
+                background: "var(--bg-panel)",
+                borderTop: "1px solid var(--border)",
+                borderLeft: "1px solid var(--border)",
+                border: "none",
+                color: "var(--text)",
+                cursor: "pointer",
+                fontSize: 18,
+                paddingBottom: "env(safe-area-inset-bottom)",
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+          </div>
         )}
       </div>
+
+      {isMobile && (
+        <MobileSettingsDrawer
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          model={model}
+          modelOptions={modelOptions as MobileSettingsModelOption[]}
+          onModelChange={onModelChange}
+          modelSwitching={modelSwitching}
+          readAloudEnabled={readAloudEnabled}
+          onReadAloudToggle={onReadAloudToggle}
+          readAloudVoices={readAloudVoices}
+          readAloudVoice={readAloudVoice}
+          onReadAloudVoiceChange={onReadAloudVoiceChange}
+          stickyEnabled={voiceInput.stickyEnabled}
+          onStickyChange={voiceInput.setStickyEnabled}
+          soundEnabled={soundEnabled}
+          onSoundToggle={onSoundToggle}
+        />
+      )}
     </div>
   );
 });
