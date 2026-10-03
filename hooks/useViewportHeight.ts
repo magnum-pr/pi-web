@@ -13,10 +13,20 @@ export function shouldUseVisualViewportHeight({
   hasFocusedEditable,
   innerHeight,
   viewportHeight,
-  viewportScale,
 }: ViewportHeightState): boolean {
-  const isUnscaled = Math.abs(viewportScale - 1) < 0.01;
-  return hasFocusedEditable && isUnscaled && innerHeight - viewportHeight > 1;
+  // The keyboard signal is the *height reduction*, not the scale.
+  //
+  // F15: this used to also require `viewport.scale === 1`, which made the
+  // resize inert in exactly the case it exists to fix. iOS magnifies the page
+  // when it cannot scroll a focused editor above the keyboard (the shell is a
+  // fixed 100dvh box with `overflow: hidden`), and that zoom sets scale !== 1
+  // — so the shell never shrank, the composer stayed unreachable, and the zoom
+  // was never relieved (a self-lockout).
+  //
+  // A reduced visual viewport with a focused editor is a keyboard; a bare pinch
+  // (no focused editor) is not, and the caller still gates its programmatic
+  // `scrollTo` on `scale === 1` so a deliberately zoomed user is never fought.
+  return hasFocusedEditable && innerHeight - viewportHeight > 1;
 }
 
 function hasFocusedEditableElement(): boolean {
