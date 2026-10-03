@@ -18,7 +18,41 @@ const SINK_KEY = "pi-read-aloud-sink";
  */
 type SinkMode = "audio-context" | "media-element" | "none";
 
+/**
+ * A read-aloud failure, decomposed.
+ *
+ * The owner-reported defect is that read-aloud "sometimes does not play at all".
+ * A bare message cannot resolve that, because "it did not play" is consistent
+ * with at least four different causes. Recording the *stage* is what makes the
+ * failure diagnosable instead of merely visible.
+ */
+export interface ReadAloudFailure {
+  /** Human-readable reason, for display. */
+  message: string;
+  /** When it happened, so a stale notice can be aged out. */
+  at: number;
+  /** Which stage failed — the fact that distinguishes the causes. */
+  stage: "request" | "decode" | "blocked" | "start" | "playback";
+  /** AudioContext state at the moment of failure, when known. */
+  contextState?: string;
+}
+
 type SinkCapableContext = AudioContext & { setSinkId?: (id: string) => Promise<void> };
+
+/**
+ * Recover the failure stage from a thrown message.
+ *
+ * The playback helpers prefix their messages with the stage they failed at, so
+ * the stage survives the round trip through `throw`/`catch` without needing a
+ * custom error class at every call site.
+ */
+function stageFromMessage(message: string): ReadAloudFailure["stage"] {
+  if (/blocked/i.test(message)) return "blocked";
+  if (/decoded/i.test(message)) return "decode";
+  if (/start playback/i.test(message)) return "start";
+  if (/mid-playback/i.test(message)) return "playback";
+  return "request";
+}
 
 function detectSinkMode(): SinkMode {
   if (typeof window === "undefined") return "none";
@@ -71,6 +105,12 @@ export function useReadAloud() {
   const [speaking, setSpeaking] = useState(false);
   const [speakingText, setSpeakingText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The last structured failure — stage plus context state. `error` stays for
+   * rendering; this exists so the *reason* is inspectable rather than only the
+   * sentence, which is the whole point of F18.
+   */
+  const [lastFailure, setLastFailure] = useState<ReadAloudFailure | null>(null);
   const [voice, setVoiceState] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     return localStorage.getItem(VOICE_KEY);
@@ -213,12 +253,44 @@ export function useReadAloud() {
     setSpeakingText(null);
   }, []);
 
-  /** Play decoded audio through the AudioContext, pinned to the chosen sink. */
+  /**
+   * Play decoded audio through the AudioContext, pinned to the chosen sink.
+   *
+   * This is the path iOS Safari takes, and it is the one the owner reported as
+   * "sometimes does not play at all". It used to attach only `src.onended`, so
+   * every failure inside it rejected into nothing. Each step now reports which
+   * step failed, because "playback failed" alone cannot separate the possible
+   * causes: an audio context iOS never unlocked, a payload the decoder
+   * rejected, or a start that threw.
+   */
   const playViaContext = useCallback(async (buf: ArrayBuffer) => {
     const ctx = getCtx();
-    if (!ctx) throw new Error("Audio playback is not available");
-    if (ctx.state === "suspended") await ctx.resume().catch(() => {});
-    const audioBuffer = await ctx.decodeAudioData(buf);
+    if (!ctx) throw new Error("Playback failed: Web Audio is unavailable");
+
+    // iOS only lets audio start from a user gesture. A context left `suspended`
+    // plays nothing at all, and this used to be swallowed by a bare `.catch`.
+    // Resume, then *re-read the state* rather than assuming it worked.
+    if (ctx.state === "suspended") {
+      try {
+        await ctx.resume();
+      } catch {
+        // fall through to the state check — it is the authoritative answer
+      }
+    }
+    if (ctx.state !== "running") {
+      throw new Error(
+        `Playback failed: audio is blocked (context is "${ctx.state}") — tap the screen once, then try again`,
+      );
+    }
+
+    let audioBuffer: AudioBuffer;
+    try {
+      audioBuffer = await ctx.decodeAudioData(buf);
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      throw new Error(`Playback failed: the audio could not be decoded (${detail})`);
+    }
+
     const src = ctx.createBufferSource();
     src.buffer = audioBuffer;
     src.connect(ctx.destination);
@@ -229,8 +301,18 @@ export function useReadAloud() {
       setSpeaking(false);
       setSpeakingText(null);
     };
+    // NOTE: AudioBufferSourceNode has no `onerror` — unlike <audio>, a buffer
+    // source cannot fail asynchronously once started. Start-time failures are
+    // synchronous and caught below, which is the only error surface this node
+    // actually has.
     sourceRef.current = src;
-    src.start();
+    try {
+      src.start();
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      sourceRef.current = null;
+      throw new Error(`Playback failed: could not start playback (${detail})`);
+    }
   }, [getCtx]);
 
   /**
@@ -273,6 +355,21 @@ export function useReadAloud() {
     speakingTextRef.current = trimmed;
     setSpeaking(true);
     setSpeakingText(trimmed);
+
+    const fail = (message: string, stage: ReadAloudFailure["stage"]) => {
+      speakingRef.current = false;
+      speakingTextRef.current = null;
+      setSpeaking(false);
+      setSpeakingText(null);
+      setError(message);
+      setLastFailure({
+        message,
+        at: Date.now(),
+        stage,
+        contextState: (ctxRef.current as AudioContext | null)?.state,
+      });
+    };
+
     try {
       const res = await fetch("/api/speak", {
         method: "POST",
@@ -281,7 +378,7 @@ export function useReadAloud() {
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(err.error ?? `HTTP ${res.status}`);
+        throw Object.assign(new Error(err.error ?? `HTTP ${res.status}`), { _stage: "request" as const });
       }
       const buf = await res.arrayBuffer();
       if (sinkModeRef.current === "media-element") {
@@ -290,11 +387,13 @@ export function useReadAloud() {
         await playViaContext(buf);
       }
     } catch (e) {
-      speakingRef.current = false;
-      speakingTextRef.current = null;
-      setSpeaking(false);
-      setSpeakingText(null);
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      const stage = (e as { _stage?: ReadAloudFailure["stage"] })._stage ?? stageFromMessage(message);
+      fail(message, stage);
+      // Re-throw so callers can react. The state is already updated above for
+      // the UI; this exists for the auto-read path, which needs to know the
+      // read failed so it can still re-arm the voice follow-up window.
+      throw e instanceof Error ? e : new Error(message);
     }
   }, [voice, stop, playViaContext, playViaElement]);
 
@@ -314,6 +413,12 @@ export function useReadAloud() {
     speaking,
     speakingText,
     error,
+    lastFailure,
+    /** Clear a surfaced failure once the user has seen it. */
+    clearError: useCallback(() => {
+      setError(null);
+      setLastFailure(null);
+    }, []),
     speak,
     stop,
     toggle,

@@ -43,6 +43,9 @@ interface Props {
   readAloudSink?: string;
   onReadAloudSinkChange?: (deviceId: string) => void;
   readAloudSinkSupported?: boolean;
+  /** Why the last read-aloud failed — shown in the Audio section, beside the control. */
+  readAloudError?: string | null;
+  onDismissReadAloudError?: () => void;
 
   // Sticky follow-up. Browser-local on mobile; the desktop and the server
   // config file are deliberately unaffected.
@@ -236,6 +239,8 @@ export function MobileSettingsDrawer({
   readAloudSink,
   onReadAloudSinkChange,
   readAloudSinkSupported,
+  readAloudError,
+  onDismissReadAloudError,
   stickyEnabled,
   onStickyChange,
   thinkingLevel,
@@ -526,6 +531,47 @@ export function MobileSettingsDrawer({
                   attr="data-mobile-settings-sound"
                 />
               </div>
+
+              {/* The read-aloud failure, beside the control that causes it.
+                  It used to be recorded and rendered nowhere, which is what
+                  made "it did not play" impossible to diagnose. */}
+              {readAloudError && (
+                <div
+                  data-mobile-settings-readaloud-error="true"
+                  role="alert"
+                  style={{
+                    ...rowStyle,
+                    alignItems: "flex-start",
+                    paddingTop: 10,
+                  }}
+                >
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ ...labelStyle, color: "#e01a4f" }}>Read-aloud failed</span>
+                    <span style={{ ...hintStyle, display: "block" }}>{readAloudError}</span>
+                  </span>
+                  {onDismissReadAloudError && (
+                    <button
+                      type="button"
+                      data-mobile-settings-readaloud-error-dismiss="true"
+                      aria-label="Dismiss read-aloud error"
+                      onClick={onDismissReadAloudError}
+                      style={{
+                        minWidth: 44,
+                        minHeight: 44,
+                        flexShrink: 0,
+                        background: "none",
+                        border: "1px solid var(--border)",
+                        borderRadius: 10,
+                        color: "var(--text-muted)",
+                        fontSize: 14,
+                        cursor: "pointer",
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              )}
             </Section>
 
             {/* ---------------------------------------------------------- Voice */}

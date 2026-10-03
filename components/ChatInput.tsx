@@ -93,6 +93,13 @@ interface Props {
   onReadAloudSinkChange?: (deviceId: string) => void;
   /** False where AudioContext.setSinkId is unavailable (Firefox/Safari). */
   readAloudSinkSupported?: boolean;
+  /**
+   * Why the last read-aloud failed, if it did. Surfaced rather than swallowed:
+   * the defining property of F18 was that a failed read-aloud reported itself
+   * nowhere, so "it did not play" was indistinguishable from "it was never asked to".
+   */
+  readAloudError?: string | null;
+  onDismissReadAloudError?: () => void;
   /** Increments when the agent's spoken reply (or message) finishes — re-arms voice follow-ups. */
   voiceArmSignal?: number;
   /** True while the assistant's read-aloud is playing — mutes the voice mic so it can't hear itself. */
@@ -467,6 +474,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   soundEnabled, onSoundToggle, onAudioUnlock,
   readAloudEnabled, onReadAloudToggle, readAloudVoices, readAloudVoice, onReadAloudVoiceChange,
   readAloudSink, onReadAloudSinkChange, readAloudSinkSupported,
+  readAloudError, onDismissReadAloudError,
   voiceArmSignal = 0,
   voiceMicMuted = false,
   onPromptWithStreamingBehavior,
@@ -2802,6 +2810,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           readAloudSink={readAloudSink}
           onReadAloudSinkChange={onReadAloudSinkChange}
           readAloudSinkSupported={readAloudSinkSupported}
+          readAloudError={readAloudError}
+          onDismissReadAloudError={onDismissReadAloudError}
           stickyEnabled={voiceInput.stickyEnabled}
           onStickyChange={voiceInput.setStickyEnabled}
           voiceEnabled={voiceInput.enabled}

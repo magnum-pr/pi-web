@@ -408,7 +408,13 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       const latest = [...messages].reverse().find((m) => m.role === "assistant" && getAssistantProseText(m));
       if (!latest) return;
       if (completionNotificationsEnabled && readAloudEnabled) {
-        void readAloudSpeak(getAssistantProseText(latest));
+        // A rejected read-aloud must still re-arm the follow-up window. The
+        // re-arm effect below fires on a speaking true→false transition, and a
+        // failure that never starts speaking produces no transition — so the
+        // voice follow-up window silently died along with the audio.
+        void readAloudSpeak(getAssistantProseText(latest)).catch(() => {
+          setVoiceArmSignal((n) => n + 1);
+        });
         return; // sticky re-arms when playback completes (effect below)
       }
       // No spoken output → re-arm the follow-up window on completion.
@@ -731,6 +737,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       readAloudSink={readAloud.sinkId}
       onReadAloudSinkChange={readAloud.setSinkId}
       readAloudSinkSupported={readAloud.sinkSupported}
+      readAloudError={readAloud.error}
+      onDismissReadAloudError={readAloud.clearError}
       voiceArmSignal={voiceArmSignal}
       voiceMicMuted={readAloud.speaking}
       draftKey={session?.id ?? newSessionDraftKey ?? undefined}
