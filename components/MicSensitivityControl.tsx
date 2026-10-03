@@ -20,7 +20,7 @@ interface Props {
  * polling stops as soon as this unmounts.
  */
 export function MicSensitivityControl({ meter, sensitivity, setSensitivity, label }: Props) {
-  const [level, setLevel] = useState<MicMeter>({ db: -60, threshold: -60, active: false });
+  const [level, setLevel] = useState<MicMeter>({ db: -60, threshold: -60, active: false, frames: 0 });
 
   useEffect(() => {
     const id = setInterval(() => setLevel({ ...meter.current }), 60);

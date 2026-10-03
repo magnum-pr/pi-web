@@ -19,6 +19,32 @@ const SINK_KEY = "pi-read-aloud-sink";
 type SinkMode = "audio-context" | "media-element" | "none";
 
 /**
+ * Shown when the browser refused to start audio without a user gesture.
+ *
+ * This is a *recoverable* condition, not a fault: the same reply plays the
+ * moment the user taps. Saying so turns a dead feature into one extra tap.
+ */
+export const AUTOPLAY_BLOCKED_MESSAGE =
+  "Not allowed to play automatically — tap Read aloud to hear this reply";
+
+/**
+ * Is this failure the browser's autoplay policy rather than a real fault?
+ *
+ * Safari/Firefox reject `play()` with a `NotAllowedError`; some builds use a
+ * different name, so match on the name *and* the message rather than the
+ * constructor, which differs across engines.
+ */
+function isAutoplayBlock(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const name = (e as { name?: string }).name ?? "";
+  return (
+    name === "NotAllowedError" ||
+    name === "AbortError" ||
+    /not allowed|user gesture|user activation|autoplay/i.test(e.message)
+  );
+}
+
+/**
  * A read-aloud failure, decomposed.
  *
  * The owner-reported defect is that read-aloud "sometimes does not play at all".
@@ -342,6 +368,14 @@ export function useReadAloud() {
       await el.play();
     } catch (e) {
       finish();
+      // iOS refuses to start audio that no user gesture asked for. Automatic
+      // read-aloud fires when a turn finishes — not a gesture — so Safari
+      // rejects it here while *manual* read-aloud (a tap) succeeds. That
+      // asymmetry is the observed defect: the owner sees "audio playback
+      // failed" automatically, and the same reply plays fine when tapped.
+      if (isAutoplayBlock(e)) {
+        throw Object.assign(new Error(AUTOPLAY_BLOCKED_MESSAGE), { _stage: "blocked" as const });
+      }
       throw e;
     }
   }, []);

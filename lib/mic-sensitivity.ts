@@ -20,6 +20,16 @@ export interface MicMeter {
   db: number;
   threshold: number;
   active: boolean;
+  /**
+   * Monotonic count of audio frames delivered by the capture loop.
+   *
+   * This is the only trustworthy liveness signal. `db`/`active` merely hold
+   * their last value when the loop dies, so comparing them cannot distinguish
+   * "nobody is talking" from "the microphone stopped delivering" — the two
+   * cases look identical. A counter that only ever increases makes staleness
+   * unambiguous.
+   */
+  frames: number;
 }
 
 /**

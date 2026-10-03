@@ -30,41 +30,45 @@ export function useDeadCapture(
   enabled: boolean,
 ): { dead: boolean; clear: () => void } {
   const [dead, setDead] = useState(false);
-  const lastFrameRef = useRef<{ db: number; threshold: number; at: number } | null>(null);
-  // Seeded on first use inside the effect — `Date.now()` during render is
-  // impure and the linter (rightly) rejects it.
-  const lastChangeAtRef = useRef<number>(0);
+  /**
+   * Last observed frame count, and when it last advanced.
+   *
+   * The previous implementation compared `db`/`threshold`/`active` against
+   * their previous values. That cannot work: when the capture loop dies it
+   * stops *writing* the meter, so the values do not change — they freeze,
+   * still carrying `active: true` from the last live frame. Every check
+   * therefore read "unchanged, but the values look alive" and never latched.
+   *
+   * The frame counter only ever increases, so a counter that has not moved for
+   * DEAD_AFTER_MS is unambiguous proof the loop stopped.
+   */
+  const lastFramesRef = useRef<number>(-1);
+  const lastAdvanceAtRef = useRef<number>(0);
 
   useEffect(() => {
     if (!enabled || phase === "idle" || phase === "working") {
       setDead(false);
-      lastFrameRef.current = null;
+      lastFramesRef.current = -1;
       return;
     }
     if (dead) return; // already latched; only a user action clears it
 
-    lastChangeAtRef.current = Date.now();
+    lastAdvanceAtRef.current = Date.now();
+    lastFramesRef.current = meterRef.current?.frames ?? -1;
+
     const id = window.setInterval(() => {
       const m = meterRef.current;
       if (!m) return;
       const now = Date.now();
 
-      if (m.active) {
-        // `active` flips true the moment the capture loop produces a frame, so
-        // it doubles as proof the analyser is alive.
-        lastChangeAtRef.current = now;
-        lastFrameRef.current = { db: m.db, threshold: m.threshold, at: now };
+      if (m.frames !== lastFramesRef.current) {
+        // The audio loop is delivering. This is the only proof of life.
+        lastFramesRef.current = m.frames;
+        lastAdvanceAtRef.current = now;
         return;
       }
 
-      const prev = lastFrameRef.current;
-      if (prev && (prev.db !== m.db || prev.threshold !== m.threshold)) {
-        lastChangeAtRef.current = now;
-        lastFrameRef.current = { db: m.db, threshold: m.threshold, at: now };
-        return;
-      }
-
-      if (now - lastChangeAtRef.current >= DEAD_AFTER_MS) setDead(true);
+      if (now - lastAdvanceAtRef.current >= DEAD_AFTER_MS) setDead(true);
     }, 1000);
 
     return () => window.clearInterval(id);

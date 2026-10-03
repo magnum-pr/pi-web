@@ -46,6 +46,12 @@ interface Props {
   /** Why the last read-aloud failed — shown in the Audio section, beside the control. */
   readAloudError?: string | null;
   onDismissReadAloudError?: () => void;
+  /**
+   * Present only when the failure is the browser's autoplay policy, i.e. the
+   * same reply will play if the user taps. A blocked start is recoverable, so
+   * it is offered as a retry rather than reported as a fault.
+   */
+  onRetryReadAloud?: () => void;
 
   // Sticky follow-up. Browser-local on mobile; the desktop and the server
   // config file are deliberately unaffected.
@@ -241,6 +247,7 @@ export function MobileSettingsDrawer({
   readAloudSinkSupported,
   readAloudError,
   onDismissReadAloudError,
+  onRetryReadAloud,
   stickyEnabled,
   onStickyChange,
   thinkingLevel,
@@ -548,6 +555,29 @@ export function MobileSettingsDrawer({
                   <span style={{ minWidth: 0 }}>
                     <span style={{ ...labelStyle, color: "#e01a4f" }}>Read-aloud failed</span>
                     <span style={{ ...hintStyle, display: "block" }}>{readAloudError}</span>
+                    {/* A start blocked by autoplay policy is not a fault — the
+                        audio plays fine from a tap. Offer the tap. */}
+                    {onRetryReadAloud && (
+                      <button
+                        type="button"
+                        data-mobile-settings-readaloud-retry="true"
+                        onClick={onRetryReadAloud}
+                        style={{
+                          marginTop: 8,
+                          minHeight: 44,
+                          padding: "0 14px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 10,
+                          color: "var(--text)",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Read aloud now
+                      </button>
+                    )}
                   </span>
                   {onDismissReadAloudError && (
                     <button

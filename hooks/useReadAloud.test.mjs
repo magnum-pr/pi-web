@@ -87,3 +87,48 @@ test("auto-read failure does not leave the follow-up window un-armed", () => {
     "a rejected read-aloud must still re-arm voice follow-ups",
   );
 });
+
+/**
+ * Autoplay policy rejection (owner, on device 2026-10-04).
+ *
+ * The decisive observation: "Read aloud failed, audio playback failed. Manual
+ * read aloud works." Manual is a tap — a user gesture. Automatic fires when a
+ * turn finishes, which is not. iOS rejects a non-gesture `play()` outright.
+ *
+ * So this is not a fault, it is a recoverable refusal, and the distinction has
+ * to survive into the UI: the reply will play the instant it is tapped.
+ */
+
+test("a rejected play() is classified as autoplay policy, not a generic failure", () => {
+  assert.match(readAloud, /isAutoplayBlock/, "the block must be identified specifically");
+  // Safari rejects with NotAllowedError; some engines use AbortError, and the
+  // message wording varies. Match broadly rather than on one constructor.
+  assert.match(readAloud, /NotAllowedError/);
+  assert.match(readAloud, /user gesture|user activation|not allowed/i);
+});
+
+test("the autoplay case says what to do, rather than reporting a fault", () => {
+  assert.match(readAloud, /AUTOPLAY_BLOCKED_MESSAGE/);
+  assert.match(readAloud, /tap Read aloud/i, "the message must name the recovery");
+});
+
+test("the blocked case is tagged with its own stage", () => {
+  // The retry affordance is offered ONLY for `blocked`. If the stage were
+  // folded into a generic failure, every real fault would also offer a retry
+  // that cannot possibly work.
+  const idx = readAloud.indexOf("_stage: \"blocked\" as const");
+  assert.ok(idx > -1, "the autoplay path must tag stage=blocked");
+});
+
+test("the drawer offers a retry only when a tap can actually recover it", () => {
+  const drawer = readFile(new URL("../components/mobile/MobileSettingsDrawer.tsx", import.meta.url), "utf8");
+  return drawer.then((src) => {
+    assert.match(src, /onRetryReadAloud/, "the drawer must expose the retry");
+    assert.match(src, /data-mobile-settings-readaloud-retry/, "…as an addressable control");
+  });
+});
+
+test("the retry is gated on stage === blocked at the call site", () => {
+  // Offering "Read aloud now" for, say, an HTTP 500 would be a dead button.
+  assert.match(chatWindow, /lastFailure\?\.stage === "blocked"/);
+});

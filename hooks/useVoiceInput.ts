@@ -209,7 +209,15 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
   }, []);
 
   /** Live level/threshold for the mic menu's meter (no React churn per chunk). */
-  const meterRef = useRef<MicMeter>({ db: -60, threshold: -60, active: false });
+  const meterRef = useRef<MicMeter>({ db: -60, threshold: -60, active: false, frames: 0 });
+  /**
+   * Monotonic frame count, incremented only by the capture loop.
+   *
+   * Kept as a ref rather than read out of `meterRef` at detection time because
+   * the dead-capture check needs to compare *successive* observations; the
+   * value in `meterRef` is overwritten by the loop, so it cannot hold history.
+   */
+  const frameCountRef = useRef(0);
 
   const enabledRef = useRef(enabled);
   useEffect(() => {
@@ -651,6 +659,7 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
             db,
             threshold: silenceDb,
             active: cur === "recording" || cur === "armed" || cur === "sticky",
+            frames: ++frameCountRef.current,
           };
 
           if (cur === "recording") {
