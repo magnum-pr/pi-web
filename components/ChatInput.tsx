@@ -100,8 +100,6 @@ interface Props {
    */
   readAloudError?: string | null;
   onDismissReadAloudError?: () => void;
-  /** Present only when a tap can recover the failure (autoplay policy). */
-  onRetryReadAloud?: () => void;
   /** Increments when the agent's spoken reply (or message) finishes — re-arms voice follow-ups. */
   voiceArmSignal?: number;
   /** True while the assistant's read-aloud is playing — mutes the voice mic so it can't hear itself. */
@@ -476,7 +474,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   soundEnabled, onSoundToggle, onAudioUnlock,
   readAloudEnabled, onReadAloudToggle, readAloudVoices, readAloudVoice, onReadAloudVoiceChange,
   readAloudSink, onReadAloudSinkChange, readAloudSinkSupported,
-  readAloudError, onDismissReadAloudError, onRetryReadAloud,
+  readAloudError, onDismissReadAloudError,
   voiceArmSignal = 0,
   voiceMicMuted = false,
   onPromptWithStreamingBehavior,
@@ -2814,7 +2812,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           readAloudSinkSupported={readAloudSinkSupported}
           readAloudError={readAloudError}
           onDismissReadAloudError={onDismissReadAloudError}
-          onRetryReadAloud={onRetryReadAloud}
           stickyEnabled={voiceInput.stickyEnabled}
           onStickyChange={voiceInput.setStickyEnabled}
           voiceEnabled={voiceInput.enabled}

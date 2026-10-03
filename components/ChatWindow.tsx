@@ -739,18 +739,6 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       readAloudSinkSupported={readAloud.sinkSupported}
       readAloudError={readAloud.error}
       onDismissReadAloudError={readAloud.clearError}
-      // Only offered when the block is autoplay policy: that one is recoverable
-      // by a tap, so it is a retry rather than a fault report.
-      onRetryReadAloud={
-        readAloud.lastFailure?.stage === "blocked"
-          ? () => {
-              const latest = [...messages]
-                .reverse()
-                .find((m) => m.role === "assistant" && getAssistantProseText(m));
-              if (latest) void readAloud.speak(getAssistantProseText(latest)).catch(() => {});
-            }
-          : undefined
-      }
       voiceArmSignal={voiceArmSignal}
       voiceMicMuted={readAloud.speaking}
       draftKey={session?.id ?? newSessionDraftKey ?? undefined}

@@ -19,13 +19,16 @@ const SINK_KEY = "pi-read-aloud-sink";
 type SinkMode = "audio-context" | "media-element" | "none";
 
 /**
- * Shown when the browser refused to start audio without a user gesture.
+ * Shown when the browser refused to start audio because no gesture had unlocked
+ * the page yet.
  *
- * This is a *recoverable* condition, not a fault: the same reply plays the
- * moment the user taps. Saying so turns a dead feature into one extra tap.
+ * This is recoverable and usually self-correcting: the first tap anywhere
+ * establishes the unlock and the refused reply is replayed automatically. The
+ * wording therefore describes what is happening and what will happen, rather
+ * than telling the user to complete a step the app handles itself.
  */
 export const AUTOPLAY_BLOCKED_MESSAGE =
-  "Not allowed to play automatically — tap Read aloud to hear this reply";
+  "Audio was locked when this reply arrived — it will play once you tap the screen";
 
 /**
  * Is this failure the browser's autoplay policy rather than a real fault?
@@ -181,10 +184,45 @@ export function useReadAloud() {
   }, []);
 
   const ctxRef = useRef<AudioContext | null>(null);
+  /**
+   * One long-lived <audio> element, reused for every reply.
+   *
+   * Previously a new element was constructed per speak. That matters on iOS:
+   * the user-gesture restriction is lifted per element on several paths, so a
+   * brand-new element is unproven again even after the page has been
+   * interacted with. Reusing one element keeps the unlock that `unlockAudio`
+   * earned on the first tap.
+   */
+  const elementRef = useRef<HTMLAudioElement | null>(null);
+  /** True once the silent-buffer unlock has been performed. */
+  const unlockedRef = useRef(false);
+  /**
+   * The reply that was refused because the page was not yet unlocked.
+   *
+   * Held so it can be replayed the moment a gesture unlocks audio. This is what
+   * replaces the old "Read aloud now" button: the recovery is automatic, so the
+   * UI does not have to ask the user to perform a step the app can perform
+   * itself.
+   */
+  const blockedTextRef = useRef<string | null>(null);
+  /** Set once `speak` exists, so `unlockAudio` can replay without a cycle. */
+  const replayRef = useRef<(() => void) | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const speakingRef = useRef(false);
   const speakingTextRef = useRef<string | null>(null);
+
+  /** The reusable playback element, created once. */
+  const ensureAudioElement = useCallback((): HTMLAudioElement | null => {
+    if (typeof window === "undefined") return null;
+    if (elementRef.current) return elementRef.current;
+    const el = new Audio();
+    // Keep it in the graph so iOS treats it as a live media element.
+    el.preload = "auto";
+    el.setAttribute("playsinline", "true");
+    elementRef.current = el;
+    return el;
+  }, []);
 
   const getCtx = useCallback((): AudioContext | null => {
     if (ctxRef.current && ctxRef.current.state !== "closed") return ctxRef.current;
@@ -217,10 +255,69 @@ export function useReadAloud() {
     };
   }, [sinkId, resolveSinkTarget]);
 
+  /**
+   * Establish and hold the browser's audio unlock.
+   *
+   * WebKit lifts the user-gesture requirement permanently once a gesture has
+   * been processed (`removeBehaviorRestrictionsAfterFirstUserGesture`), so the
+   * block is not permanent — it only applies until the page has been interacted
+   * with. This runs on the first tap and keeps a live, unlocked context and a
+   * *primed* <audio> element around afterwards, because a newly constructed
+   * AudioContext or element is once again unproven.
+   *
+   * The silent buffer is the documented way to complete the unlock: starting a
+   * source node with no audible output marks the graph as user-initiated
+   * without making a sound.
+   */
   const unlockAudio = useCallback(() => {
     const ctx = getCtx();
-    if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
-  }, [getCtx]);
+    if (ctx && ctx.state === "suspended") {
+      void ctx.resume().catch(() => {});
+    }
+    // Silence, at zero gain: proves intent to play without being audible.
+    if (ctx && !unlockedRef.current) {
+      try {
+        const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        src.connect(gain);
+        gain.connect(ctx.destination);
+        src.start(0);
+        unlockedRef.current = true;
+      } catch {
+        // Non-fatal: playback may still succeed from a later gesture.
+      }
+    }
+    // Prime the reusable element too — a brand-new element has to earn the
+    // restriction removal again on some paths.
+    const el = ensureAudioElement();
+    if (el) {
+      try {
+        el.play().then(
+          () => {
+            el.pause();
+            el.currentTime = 0;
+          },
+          () => {
+            // Nothing to play yet; the gesture is still recorded by the attempt.
+          },
+        );
+      } catch {
+        // ignore
+      }
+    }
+
+    // Audio is now unlocked. If a reply was previously refused for exactly that
+    // reason, play it now rather than making the user find it again.
+    if (blockedTextRef.current) {
+      blockedTextRef.current = null;
+      // Deferred a tick so the unlock is committed by the engine before
+      // playback is attempted.
+      setTimeout(() => replayRef.current?.(), 0);
+    }
+  }, [getCtx, ensureAudioElement]);
 
   const loadVoices = useCallback(async () => {
     try {
@@ -348,8 +445,12 @@ export function useReadAloud() {
    * `HTMLMediaElement.setSinkId` exists (Firefox), so routing still works.
    */
   const playViaElement = useCallback(async (buf: ArrayBuffer) => {
+    const el = ensureAudioElement();
+    if (!el) throw new Error("Playback failed: audio is unavailable");
+
+    // Reuse the one element rather than constructing a fresh Audio per reply.
+    // A new element would have to earn the gesture unlock again.
     const url = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
-    const el = new Audio(url);
     audioElRef.current = el;
     // The element's own error event fires asynchronously and can land AFTER
     // `play()` has already rejected. Writing `error` from both places made the
@@ -362,6 +463,7 @@ export function useReadAloud() {
     // the failure is decided once, in the catch below.
     let elementFailed = false;
     let settled = false;
+    let ended = false;
     const finish = () => {
       URL.revokeObjectURL(url);
       if (audioElRef.current === el) audioElRef.current = null;
@@ -370,13 +472,19 @@ export function useReadAloud() {
       setSpeaking(false);
       setSpeakingText(null);
     };
-    el.onended = finish;
+    el.onended = () => {
+      ended = true;
+      settled = true;
+      finish();
+    };
     el.onerror = () => {
       elementFailed = true;
       if (settled) return; // a specific failure already won
       settled = true;
       finish();
     };
+    el.src = url;
+    el.load();
     // This path is only taken when HTMLMediaElement.setSinkId exists.
     await applySink(sinkTargetRef.current, el.setSinkId.bind(el));
     try {
@@ -393,16 +501,19 @@ export function useReadAloud() {
           _stage: "decode" as const,
         });
       }
-      // iOS refuses to start audio that no user gesture asked for. Automatic
+      // iOS refuses to start audio that no user gesture has unlocked. Automatic
       // read-aloud fires when a turn finishes — not a gesture — so Safari
-      // rejects it here while *manual* read-aloud (a tap) succeeds. That
-      // asymmetry is the observed defect.
+      // rejects it here while *manual* read-aloud (a tap) succeeds.
       if (isAutoplayBlock(e)) {
         throw Object.assign(new Error(AUTOPLAY_BLOCKED_MESSAGE), { _stage: "blocked" as const });
       }
       throw e;
     }
-  }, []);
+    if (!ended) {
+      // playback() resolved but the element never reported an end, which means
+      // it was accepted and is playing. Nothing further to do here.
+    }
+  }, [ensureAudioElement]);
 
   const speak = useCallback(async (text: string) => {
     const trimmed = text.trim();
@@ -426,6 +537,10 @@ export function useReadAloud() {
         stage,
         contextState: (ctxRef.current as AudioContext | null)?.state,
       });
+      // A gesture-refused reply is recoverable, so remember it for replay once
+      // the page is unlocked. Any other stage is a real fault and is not
+      // retried — replaying it would fail identically.
+      blockedTextRef.current = stage === "blocked" ? trimmed : null;
     };
 
     try {
@@ -454,6 +569,47 @@ export function useReadAloud() {
       throw e instanceof Error ? e : new Error(message);
     }
   }, [voice, stop, playViaContext, playViaElement]);
+
+  // Let `unlockAudio` replay a refused reply without depending on `speak`
+  // (which would be a cycle: speak → unlock → speak). Assigned in an effect
+  // rather than during render, since mutating a ref while rendering is not
+  // safe under a double-render.
+  useEffect(() => {
+    replayRef.current = () => {
+      const pending = blockedTextRef.current;
+      if (!pending) return;
+      blockedTextRef.current = null;
+      void speak(pending).catch(() => {
+        // If it is refused again, `fail` records it anew and the next tap retries.
+      });
+    };
+  }, [speak]);
+
+  /**
+   * Take the audio unlock on the first interaction anywhere in the app.
+   *
+   * WebKit lifts the user-gesture requirement permanently once a gesture has
+   * been processed, so obtaining one early is what lets *automatic* read-aloud
+   * work later. Waiting for the user to tap a specific control meant the unlock
+   * often did not exist when a reply finished. One passive listener, removed
+   * after it fires, is enough — and because it is not a capture-phase or
+   * cancelling listener, it cannot interfere with the tap it observes.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (unlockedRef.current) return;
+    const onFirstGesture = () => {
+      unlockAudio();
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+    window.addEventListener("pointerdown", onFirstGesture, { passive: true });
+    window.addEventListener("keydown", onFirstGesture);
+    return () => {
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+  }, [unlockAudio]);
 
   const toggle = useCallback((text: string) => {
     const trimmed = text.trim();

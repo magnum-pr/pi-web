@@ -107,30 +107,56 @@ test("a rejected play() is classified as autoplay policy, not a generic failure"
   assert.match(readAloud, /user gesture|user activation|not allowed/i);
 });
 
-test("the autoplay case says what to do, rather than reporting a fault", () => {
+test("the autoplay case says what is happening, not what to click", () => {
   assert.match(readAloud, /AUTOPLAY_BLOCKED_MESSAGE/);
-  assert.match(readAloud, /tap Read aloud/i, "the message must name the recovery");
+  // The message must describe the condition and the recovery, without
+  // directing the user at a control — the recovery is automatic now.
+  assert.doesNotMatch(readAloud, /tap Read aloud to hear/i, "no button-directed wording");
+  assert.match(readAloud, /will play once you tap|locked when this reply arrived/i);
 });
 
 test("the blocked case is tagged with its own stage", () => {
-  // The retry affordance is offered ONLY for `blocked`. If the stage were
-  // folded into a generic failure, every real fault would also offer a retry
-  // that cannot possibly work.
   const idx = readAloud.indexOf("_stage: \"blocked\" as const");
   assert.ok(idx > -1, "the autoplay path must tag stage=blocked");
 });
 
-test("the drawer offers a retry only when a tap can actually recover it", () => {
-  const drawer = readFile(new URL("../components/mobile/MobileSettingsDrawer.tsx", import.meta.url), "utf8");
-  return drawer.then((src) => {
-    assert.match(src, /onRetryReadAloud/, "the drawer must expose the retry");
-    assert.match(src, /data-mobile-settings-readaloud-retry/, "…as an addressable control");
-  });
+test("a refused reply is remembered so it can be replayed automatically", () => {
+  // This is what replaces the retry button: the app replays the reply itself.
+  assert.match(readAloud, /blockedTextRef/, "the refused text must be held for replay");
+  assert.match(readAloud, /replayRef/, "and there must be a replay hook");
+  assert.match(
+    readAloud,
+    /blockedTextRef\.current = stage === "blocked"/,
+    "only a gesture refusal is replayable — a real fault would fail identically",
+  );
 });
 
-test("the retry is gated on stage === blocked at the call site", () => {
-  // Offering "Read aloud now" for, say, an HTTP 500 would be a dead button.
-  assert.match(chatWindow, /lastFailure\?\.stage === "blocked"/);
+test("the unlock is taken on the first gesture anywhere in the app", () => {
+  // WebKit lifts the gesture requirement permanently after the first gesture,
+  // so obtaining one early is what lets AUTOMATIC read-aloud work later.
+  assert.match(readAloud, /pointerdown/, "a first-tap listener is what earns the unlock");
+  assert.match(readAloud, /removeEventListener\("pointerdown"/, "it must remove itself after firing");
+});
+
+test("the unlock plays a silent buffer, so the gesture is recorded without noise", () => {
+  assert.match(readAloud, /createBuffer\(1, 1,/, "a one-sample buffer at zero gain unlocks silently");
+  assert.match(readAloud, /gain\.value = 0/);
+});
+
+test("one audio element is reused rather than rebuilt per reply", () => {
+  // A newly constructed element has to earn the gesture unlock again.
+  assert.match(readAloud, /ensureAudioElement/);
+  assert.doesNotMatch(readAloud, /new Audio\(url\)/, "per-reply elements lose the unlock");
+});
+
+test("there is no retry button in the UI", () => {
+  const drawer = readFile(new URL("../components/mobile/MobileSettingsDrawer.tsx", import.meta.url), "utf8");
+  return drawer.then((src) => {
+    assert.doesNotMatch(src, /onRetryReadAloud|readaloud-retry/, "the button is not conducive to the UI");
+    // The failure is still surfaced, though — that part was the whole point.
+    assert.match(src, /readAloudError/);
+    assert.match(src, /data-mobile-settings-readaloud-error/);
+  });
 });
 
 test("the element's error event does not overwrite a more specific failure", () => {
