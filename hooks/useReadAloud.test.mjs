@@ -132,3 +132,33 @@ test("the retry is gated on stage === blocked at the call site", () => {
   // Offering "Read aloud now" for, say, an HTTP 500 would be a dead button.
   assert.match(chatWindow, /lastFailure\?\.stage === "blocked"/);
 });
+
+test("the element's error event does not overwrite a more specific failure", () => {
+  // Observed on device: the retry button was present (stage === blocked) while
+  // the message read "Audio playback failed". The element's `onerror` fires
+  // asynchronously and landed after `play()` had already rejected, so two
+  // writers disagreed about the same failure.
+  const start = readAloud.indexOf("const playViaElement");
+  const body = readAloud.slice(start, readAloud.indexOf("}, []);", start));
+  const onerrorAt = body.indexOf("el.onerror");
+  assert.ok(onerrorAt > -1, "expected the element error handler");
+  const handler = body.slice(onerrorAt, onerrorAt + 300);
+  assert.doesNotMatch(
+    handler,
+    /setError\(/,
+    "onerror must not write the user-facing error — it races the play() rejection",
+  );
+  assert.match(handler, /settled/, "it must defer when a failure is already recorded");
+});
+
+test("a genuine load failure outranks the play() rejection it causes", () => {
+  // A failed load makes play() reject too, which would otherwise be classified
+  // as an autoplay block and offer a retry that can never work.
+  const start = readAloud.indexOf("const playViaElement");
+  const body = readAloud.slice(start, readAloud.indexOf("}, []);", start));
+  assert.match(body, /elementFailed/, "a load failure must be tracked separately");
+  const decodeIdx = body.indexOf("could not be loaded");
+  const blockIdx = body.indexOf("isAutoplayBlock(e)");
+  assert.ok(decodeIdx > -1 && blockIdx > -1, "expected both classifications");
+  assert.ok(decodeIdx < blockIdx, "load failure must be checked before the autoplay block");
+});

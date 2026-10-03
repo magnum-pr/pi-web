@@ -73,7 +73,9 @@ type SinkCapableContext = AudioContext & { setSinkId?: (id: string) => Promise<v
  * custom error class at every call site.
  */
 function stageFromMessage(message: string): ReadAloudFailure["stage"] {
+  if (/not allowed to play automatically/i.test(message)) return "blocked";
   if (/blocked/i.test(message)) return "blocked";
+  if (/could not be loaded/i.test(message)) return "decode";
   if (/decoded/i.test(message)) return "decode";
   if (/start playback/i.test(message)) return "start";
   if (/mid-playback/i.test(message)) return "playback";
@@ -349,6 +351,17 @@ export function useReadAloud() {
     const url = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
     const el = new Audio(url);
     audioElRef.current = el;
+    // The element's own error event fires asynchronously and can land AFTER
+    // `play()` has already rejected. Writing `error` from both places made the
+    // message and the recorded stage disagree: the autoplay block set
+    // stage="blocked" (so the retry button appeared, correctly) and the element
+    // event then overwrote the message with the old generic "Audio playback
+    // failed". Observed on device: right button, wrong words.
+    //
+    // So the element event never writes state directly — it records *why*, and
+    // the failure is decided once, in the catch below.
+    let elementFailed = false;
+    let settled = false;
     const finish = () => {
       URL.revokeObjectURL(url);
       if (audioElRef.current === el) audioElRef.current = null;
@@ -359,20 +372,31 @@ export function useReadAloud() {
     };
     el.onended = finish;
     el.onerror = () => {
+      elementFailed = true;
+      if (settled) return; // a specific failure already won
+      settled = true;
       finish();
-      setError("Audio playback failed");
     };
     // This path is only taken when HTMLMediaElement.setSinkId exists.
     await applySink(sinkTargetRef.current, el.setSinkId.bind(el));
     try {
       await el.play();
+      settled = true;
     } catch (e) {
       finish();
+      settled = true;
+      // A load/decode failure is the more specific explanation, so it wins over
+      // the play() rejection it also causes (which would otherwise be misread
+      // as an autoplay block and offer a retry that cannot work).
+      if (elementFailed) {
+        throw Object.assign(new Error("Playback failed: the audio could not be loaded"), {
+          _stage: "decode" as const,
+        });
+      }
       // iOS refuses to start audio that no user gesture asked for. Automatic
       // read-aloud fires when a turn finishes — not a gesture — so Safari
       // rejects it here while *manual* read-aloud (a tap) succeeds. That
-      // asymmetry is the observed defect: the owner sees "audio playback
-      // failed" automatically, and the same reply plays fine when tapped.
+      // asymmetry is the observed defect.
       if (isAutoplayBlock(e)) {
         throw Object.assign(new Error(AUTOPLAY_BLOCKED_MESSAGE), { _stage: "blocked" as const });
       }
