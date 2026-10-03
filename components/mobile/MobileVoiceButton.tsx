@@ -65,6 +65,14 @@ export function MobileVoiceButton({
         paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
         borderTop: "1px solid var(--border)",
         background: "var(--bg-panel)",
+        // The pill is a control, not prose. iOS opens its text-selection loupe
+        // on a long press over selectable text, which takes over the gesture and
+        // silently drops a hold-to-talk press. Suppress selection and the
+        // long-press callout across the whole row, so the label is untouchable
+        // text in the selection sense while still being readable and announced.
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
       }}
     >
       {/*
@@ -81,6 +89,10 @@ export function MobileVoiceButton({
         onClick={mode === "hold" ? undefined : onToggle}
         onTouchStart={mode === "hold" ? onHoldStart : undefined}
         onTouchEnd={mode === "hold" ? onHoldEnd : undefined}
+        // iOS fires `touchcancel`, not `touchend`, when the system takes the
+        // gesture away (selection loupe, notification, a call). Without this the
+        // hold never ends from the UI's side and the mic is left running.
+        onTouchCancel={mode === "hold" ? onHoldEnd : undefined}
         onMouseDown={mode === "hold" ? onHoldStart : undefined}
         onMouseUp={mode === "hold" ? onHoldEnd : undefined}
         onMouseLeave={mode === "hold" ? onHoldEnd : undefined}
@@ -98,6 +110,12 @@ export function MobileVoiceButton({
           color: "var(--text)",
           cursor: "pointer",
           transition: "border-color 0.15s ease, background 0.15s ease",
+          // Claim the gesture outright while holding: the browser must not
+          // reinterpret a sustained press as a scroll or a selection drag.
+          touchAction: "none",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+          WebkitTouchCallout: "none",
         }}
       >
         <svg
@@ -127,6 +145,11 @@ export function MobileVoiceButton({
             fontSize: 13,
             fontWeight: 600,
             color: p.state === "armed" || p.state === "working" ? "var(--text-muted)" : "var(--text)",
+            // Belt and braces: selection is decided per element, and this is the
+            // text the loupe was actually latching onto.
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            pointerEvents: "none",
           }}
         >
           {label}

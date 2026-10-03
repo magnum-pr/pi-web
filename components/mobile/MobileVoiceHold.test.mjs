@@ -62,3 +62,35 @@ test("the tap handler is not dispatched on the hold gesture path", () => {
 test("hold-to-talk has a visible label so the state is never colour alone", () => {
   assert.match(buttonSource, /Hold/);
 });
+
+/**
+ * Long-press hijack (found on device 2026-10-04).
+ *
+ * On iOS a long press on selectable text opens the selection loupe, which takes
+ * over the gesture and fires `touchcancel` — so the hold silently dropped. The
+ * fix is twofold: make the pill not look selectable to the browser, and treat an
+ * interrupted touch as the end of the hold rather than leaving it running.
+ */
+
+test("the pill opts out of text selection, so a long press cannot open the loupe", () => {
+  assert.match(buttonSource, /userSelect:\s*"none"/, "text selection must be suppressed");
+  assert.match(buttonSource, /WebkitUserSelect:\s*"none"/, "iOS needs the -webkit- prefixed form");
+  // The iOS-specific long-press callout (Share / Copy menu on a held element).
+  assert.match(buttonSource, /WebkitTouchCallout:\s*"none"/, "the iOS callout must be suppressed");
+});
+
+test("the hold button claims the touch gesture so the browser does not reinterpret it", () => {
+  // Without `touch-action`, the browser may decide a held press is the start of
+  // a scroll or selection gesture and cancel the touch.
+  assert.match(buttonSource, /touchAction:\s*"none"/);
+});
+
+test("an interrupted touch ends the hold instead of stranding it", () => {
+  // iOS fires `touchcancel`, NOT `touchend`, when the selection UI takes over.
+  // Without a cancel handler the hold never ends from the UI's point of view.
+  assert.match(
+    buttonSource,
+    /onTouchCancel={mode === "hold" \? onHoldEnd : undefined}/,
+    "touchcancel must route to onHoldEnd",
+  );
+});
