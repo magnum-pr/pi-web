@@ -1365,13 +1365,11 @@ span.token.table {
   .message-usage {
     display: none !important;
   }
-  /* Session cost / context percent in the project-state header. Same reasoning
-     as .message-usage above: desktop-shaped information that displaces the
-     conversation on a phone (finding F4, and the open item on `PLAN.md`). The
-     header itself stays — only the numbers are desktop-only. */
-  .project-state-stats {
-    display: none !important;
-  }
+  /* NOTE: the session cost/context numbers used to be hidden from here. Tailwind
+     v4's PostCSS pipeline silently dropped this one rule (identical shape and
+     neighbours to .message-usage above, which survived), so the gate now lives in
+     the component via `useIsMobile` — see ProjectStateHeader. Don't re-add a rule
+     here expecting it to be emitted; it will not be. */
   .sidebar-container {
     position: fixed !important;
     top: 0;

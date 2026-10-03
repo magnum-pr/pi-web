@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useProjectState } from "@/hooks/useProjectState";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { formatProjectStateLine, type ProjectState, type SourceStatus } from "@/lib/project-state";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
@@ -35,6 +36,13 @@ function sourceGlyph(status: SourceStatus): string {
 export function ProjectStateHeader({ cwd, refreshKey = 0, sessionStats, contextUsage }: Props) {
   const result = useProjectState(cwd, refreshKey);
   const [expanded, setExpanded] = useState(false);
+  // Cost/context is desktop-shaped information that displaces the conversation
+  // on a phone (finding F4 — same class of problem as the per-turn metrics).
+  // Gated here rather than in CSS because a `max-width: 640px` rule for this
+  // selector was silently dropped by the Tailwind v4 PostCSS pipeline. This
+  // component renders once per conversation, so a hook subscription is cheap —
+  // the per-message caveat that keeps `.message-usage` in CSS does not apply.
+  const isMobile = useIsMobile();
 
   if (result.status === "idle" || result.status === "loading" || result.status === "error") {
     return null;
@@ -87,12 +95,7 @@ export function ProjectStateHeader({ cwd, refreshKey = 0, sessionStats, contextU
         <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {line || "Project state"}
         </span>
-        {hasStats && !expanded && (
-          // Cost/context. Desktop-only affordance: on a phone it occupies prime
-          // space at the top of the conversation for information you cannot act
-          // on (finding F4 — same class as the per-turn metrics). Hidden by a
-          // `max-width: 640px` rule, matching how `.message-usage` is handled,
-          // so no matchMedia subscription is needed here.
+        {hasStats && !expanded && !isMobile && (
           <span className="project-state-stats" style={{ color: "var(--text-dim)", flexShrink: 0 }}>
             {cost > 0 ? `$${cost.toFixed(2)}` : ""}
             {cost > 0 && contextWindow ? " · " : ""}

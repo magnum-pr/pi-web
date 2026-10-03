@@ -32,15 +32,17 @@ test("stop carries a word, not a bare glyph", () => {
   assert.match(block, /minWidth:\s*\d+/);
 });
 
-test("the cost/context bar is hidden on mobile by CSS, matching the metrics gate", () => {
-  // A class hook is required — the element is inline-styled, which is why the
-  // existing `.chat-stats-center` rule never caught it.
-  assert.match(headerSource, /className="project-state-stats"/);
-  const block = cssSource.slice(cssSource.indexOf(".project-state-stats"));
-  assert.match(block, /display:\s*none\s*!important/);
-  // It must sit inside a max-width media query, or it hides on desktop too.
-  const mediaIdx = cssSource.lastIndexOf("@media (max-width: 640px)", cssSource.indexOf(".project-state-stats"));
-  assert.notEqual(mediaIdx, -1, ".project-state-stats must be inside a max-width: 640px block");
+test("the cost/context bar is hidden on mobile", () => {
+  // Gated in the component, not by CSS: a `max-width: 640px` rule for this
+  // selector was silently dropped by the Tailwind v4 PostCSS pipeline while its
+  // neighbours survived, so a CSS gate here does not actually ship.
+  assert.match(headerSource, /useIsMobile/);
+  assert.match(headerSource, /hasStats && !expanded && !isMobile/);
+});
+
+test("nothing re-adds a CSS gate for the cost bar that the pipeline would drop", () => {
+  // Guard against a well-meaning future edit re-introducing the dead rule.
+  assert.doesNotMatch(cssSource, /\.project-state-stats\s*\{/);
 });
 
 test("the project-state header itself is kept — only the numbers are hidden", () => {
