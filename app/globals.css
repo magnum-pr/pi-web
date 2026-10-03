@@ -1365,6 +1365,13 @@ span.token.table {
   .message-usage {
     display: none !important;
   }
+  /* Session cost / context percent in the project-state header. Same reasoning
+     as .message-usage above: desktop-shaped information that displaces the
+     conversation on a phone (finding F4, and the open item on `PLAN.md`). The
+     header itself stays — only the numbers are desktop-only. */
+  .project-state-stats {
+    display: none !important;
+  }
   .sidebar-container {
     position: fixed !important;
     top: 0;

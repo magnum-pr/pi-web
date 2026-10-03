@@ -88,7 +88,12 @@ export function ProjectStateHeader({ cwd, refreshKey = 0, sessionStats, contextU
           {line || "Project state"}
         </span>
         {hasStats && !expanded && (
-          <span style={{ color: "var(--text-dim)", flexShrink: 0 }}>
+          // Cost/context. Desktop-only affordance: on a phone it occupies prime
+          // space at the top of the conversation for information you cannot act
+          // on (finding F4 — same class as the per-turn metrics). Hidden by a
+          // `max-width: 640px` rule, matching how `.message-usage` is handled,
+          // so no matchMedia subscription is needed here.
+          <span className="project-state-stats" style={{ color: "var(--text-dim)", flexShrink: 0 }}>
             {cost > 0 ? `$${cost.toFixed(2)}` : ""}
             {cost > 0 && contextWindow ? " · " : ""}
             {contextWindow ? `${contextPercent != null ? `${contextPercent.toFixed(0)}%` : "?"} / ${contextWindow.toLocaleString()}` : ""}

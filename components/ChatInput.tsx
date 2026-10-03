@@ -2712,6 +2712,45 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 }}
               />
             </div>
+            {/* Stop. Lives on the pill row, not in the settings drawer: a running
+                agent must be stoppable in one tap, and a drawer costs a tap plus
+                a gesture that can fail (the left edge is already contested).
+                Only rendered while streaming, matching the desktop condition;
+                it goes through the same `onAbort` as desktop so a stopped turn
+                is not read aloud afterwards. */}
+            {isStreaming && onAbort && (
+              <button
+                type="button"
+                data-mobile-stop="true"
+                onClick={onAbort}
+                aria-label={t("chat.stopAgent")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  minWidth: 72,
+                  flexShrink: 0,
+                  padding: "0 12px",
+                  background: "rgba(239,68,68,0.08)",
+                  border: "none",
+                  borderLeft: "1px solid var(--border)",
+                  borderTop: "1px solid rgba(239,68,68,0.3)",
+                  color: "#ef4444",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  paddingBottom: "env(safe-area-inset-bottom)",
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                  <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
+                </svg>
+                {/* A word, not a bare square glyph: state must never rely on
+                    shape or colour alone. */}
+                {t("chat.stop")}
+              </button>
+            )}
             {/* ⚙ opener. A button, never an edge swipe: the left edge already
                 owns the session drawer's gesture, and iOS claims part of that
                 edge in a browser tab, so a second competable gesture would only
@@ -2762,6 +2801,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           onReadAloudVoiceChange={onReadAloudVoiceChange}
           stickyEnabled={voiceInput.stickyEnabled}
           onStickyChange={voiceInput.setStickyEnabled}
+          thinkingLevel={thinkingLevel}
+          onThinkingLevelChange={onThinkingLevelChange}
+          availableThinkingLevels={availableThinkingLevels}
+          thinkingLevelMap={thinkingLevelMap}
           soundEnabled={soundEnabled}
           onSoundToggle={onSoundToggle}
         />

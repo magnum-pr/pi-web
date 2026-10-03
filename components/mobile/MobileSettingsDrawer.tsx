@@ -8,6 +8,11 @@ export interface MobileSettingsModelOption {
   name: string;
 }
 
+/** Same set the desktop selector offers, including `auto`. */
+const THINKING_LEVELS = ["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+/** Matches ChatInput's own prop type so the handler can be passed straight through. */
+type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -30,6 +35,14 @@ interface Props {
   // config file are deliberately unaffected.
   stickyEnabled: boolean;
   onStickyChange: (enabled: boolean) => void;
+
+  // Reasoning / thinking level.
+  thinkingLevel?: ThinkingLevel;
+  onThinkingLevelChange?: (level: ThinkingLevel) => void;
+  /** Levels this model actually supports; null = don't filter. */
+  availableThinkingLevels?: string[] | null;
+  /** Provider-specific display names for a level (e.g. "xhigh" → "Extra high"). */
+  thinkingLevelMap?: Record<string, string | null> | null;
 
   // Completion sound. When the caller supplies the props they win; otherwise
   // the drawer owns the same `pi-sound-enabled` preference the desktop
@@ -70,6 +83,10 @@ export function MobileSettingsDrawer({
   onReadAloudVoiceChange,
   stickyEnabled,
   onStickyChange,
+  thinkingLevel,
+  onThinkingLevelChange,
+  availableThinkingLevels,
+  thinkingLevelMap,
   soundEnabled,
   onSoundToggle,
 }: Props) {
@@ -285,6 +302,38 @@ export function MobileSettingsDrawer({
                     {v.replace(/^en_US-/, "").replace(/-medium$/, "")}
                   </option>
                 ))}
+              </select>
+            </div>
+          )}
+
+          {/* Reasoning level. Mirrors the desktop filter exactly: a level is
+              offered when the model supports it, and `auto` is always kept. */}
+          {onThinkingLevelChange !== undefined && (
+            <div style={rowStyle}>
+              <span>
+                <span style={labelStyle}>Reasoning</span>
+                <span style={{ ...hintStyle, display: "block" }}>How hard the model thinks before answering</span>
+              </span>
+              <select
+                data-mobile-settings-reasoning="true"
+                aria-label="Reasoning level"
+                value={thinkingLevel ?? "auto"}
+                onChange={(e) => onThinkingLevelChange(e.target.value as ThinkingLevel)}
+                style={selectStyle}
+              >
+                {THINKING_LEVELS.filter((lvl) => {
+                  if (!availableThinkingLevels) return true;
+                  if (lvl === "auto") return true;
+                  return availableThinkingLevels.includes(lvl);
+                }).map((lvl) => {
+                  const mapped = lvl !== "auto" && thinkingLevelMap ? thinkingLevelMap[lvl] : undefined;
+                  const label = mapped != null && mapped !== lvl ? mapped : lvl;
+                  return (
+                    <option key={lvl} value={lvl}>
+                      {label}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           )}
