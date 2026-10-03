@@ -326,6 +326,32 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     gotoPhase("recording");
   }, [gotoPhase]);
 
+  /**
+   * Hold-to-talk (F17): press starts a capture *directly*.
+   *
+   * This deliberately does not go through `setEnabled`. The power flag owns the
+   * stream lifecycle, so routing a press through it opened the mic and put the
+   * hook in `armed` — wake-word listening — which meant a held press could never
+   * actually capture speech. Hold is a capture gesture, not a power gesture.
+   *
+   * If the mic is off, turn it on so the capture has a stream to record from;
+   * `endHold` is responsible for not leaving it latched on.
+   */
+  const beginHold = useCallback(() => {
+    setError(null);
+    if (!enabledRef.current) {
+      setEnabledState(true);
+      try {
+        localStorage.setItem(STORAGE_KEY, "true");
+      } catch {
+        // ignore storage errors
+      }
+      enabledRef.current = true;
+    }
+    clearStickyTimer();
+    startRecording();
+  }, [clearStickyTimer, startRecording]);
+
   // After a turn is sent (or aborted), sit quiet in `working` if sticky is on
   // (awaiting the read-aloud-complete re-arm), else return to wake-word-only.
   const finishTurn = useCallback(() => {
@@ -367,6 +393,19 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
         finishTurn();
       });
   }, [onSend, gotoPhase, finishTurn]);
+
+  /**
+   * Hold-to-talk release: send what was captured.
+   *
+   * Mirrors the wake-word path — releasing ends the capture and transcribes it,
+   * rather than killing the mic. Silence/max-duration in `onaudioprocess` can
+   * still end the capture first; those are the same end reasons as any capture,
+   * so a no-op guard keeps a double-release from double-sending.
+   */
+  const endHold = useCallback(() => {
+    if (phaseRef.current !== "recording") return;
+    stopAndTranscribe("stop-word");
+  }, [stopAndTranscribe]);
 
   // Re-arm the sticky follow-up window. Called when the agent's spoken reply
   // finishes (or the message completes if read-aloud is off).
@@ -594,6 +633,9 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     error,
     /** How the last capture ended, or null before the first one. */
     endReason,
+    /** Hold-to-talk: press starts a capture, release sends it. */
+    beginHold,
+    endHold,
     micMode,
     setMicMode,
     devices,

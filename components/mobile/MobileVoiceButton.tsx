@@ -11,9 +11,9 @@ interface Props {
   dead: boolean;
   mode: VoiceMode;
   onModeChange: (mode: VoiceMode) => void;
-  /** Tap: enable/disable, or resume after a dead capture. */
+  /** Tap, `wake` mode only: enable/disable, or resume after a dead capture. */
   onToggle: () => void;
-  /** Hold-to-talk, only meaningful in `hold` mode. */
+  /** Hold-to-talk, `hold` mode only. */
   onHoldStart: () => void;
   onHoldEnd: () => void;
 }
@@ -47,10 +47,16 @@ export function MobileVoiceButton({
 }: Props) {
   const p = voicePresentation(phase, { dead, enabled });
 
+  // In `hold` mode the resting/armed wording is a lie: nothing is listening for
+  // the wake word, the pill is waiting to be pressed. Say what the gesture does.
+  const holdIdle = mode === "hold" && (p.state === "off" || p.state === "armed" || p.state === "working");
+  const label = holdIdle ? "Hold to talk" : p.label;
+  const state = holdIdle ? "off" : p.state;
+
   return (
     <div
       data-mobile-voice="true"
-      data-mobile-voice-state={p.state}
+      data-mobile-voice-state={state}
       style={{
         display: "flex",
         alignItems: "center",
@@ -61,12 +67,18 @@ export function MobileVoiceButton({
         background: "var(--bg-panel)",
       }}
     >
+      {/*
+        In `hold` mode the tap handler is deliberately NOT bound. `onClick`
+        fires on release as well as on a tap, so leaving it attached ran the
+        toggle straight after the hold ended — which re-enabled the mic and left
+        it running despite the label (F17).
+      */}
       <button
         type="button"
         data-mobile-voice-button="true"
-        aria-label={p.label}
-        aria-pressed={enabled}
-        onClick={onToggle}
+        aria-label={label}
+        aria-pressed={mode === "hold" ? p.state === "recording" : enabled}
+        onClick={mode === "hold" ? undefined : onToggle}
         onTouchStart={mode === "hold" ? onHoldStart : undefined}
         onTouchEnd={mode === "hold" ? onHoldEnd : undefined}
         onMouseDown={mode === "hold" ? onHoldStart : undefined}
@@ -117,7 +129,7 @@ export function MobileVoiceButton({
             color: p.state === "armed" || p.state === "working" ? "var(--text-muted)" : "var(--text)",
           }}
         >
-          {p.label}
+          {label}
         </span>
       </button>
 

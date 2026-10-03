@@ -2696,11 +2696,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               voiceInput.setEnabled(!voiceInput.enabled);
             }}
             onHoldStart={() => {
+              // Capture gesture, not a power gesture (F17). `beginHold` starts a
+              // real recording; the old handler flipped the persistent power
+              // flag, which only armed the wake word and latched the mic on.
               deadCapture.clear();
-              if (!voiceInput.enabled) voiceInput.setEnabled(true);
+              voiceInput.beginHold();
             }}
             onHoldEnd={() => {
-              if (voiceInput.enabled) voiceInput.setEnabled(false);
+              voiceInput.endHold();
             }}
           />
         )}

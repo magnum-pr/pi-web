@@ -78,8 +78,26 @@ export function MobileSessionDrawer({
         }}
       />
 
-      <aside
-        data-mobile-drawer={open ? "open" : "closed"}
+      {/*
+        The drawer is parked at `left: 0` and hidden by a clip window that
+        collapses to zero width — never by a negative horizontal offset.
+
+        Why this matters (F15): the previous form used
+        `transform: translateX(-101%)`, which put a `position: fixed` element
+        ~323px to the LEFT of the viewport on a 393px screen. Measured on the
+        live build: `matrix(1,0,0,1,-323.2,0)`. That was the only element on
+        the page extending left of the viewport, and iOS Safari — which is
+        aggressive about revealing offscreen content when a field takes focus —
+        scrolled toward it when the composer was tapped. Chrome clips it silently
+        (`documentElement.scrollWidth` stays 393), so this never reproduced in
+        emulation.
+
+        The clip window keeps the drawer visually identical while leaving no
+        element offscreen-left. It must stay at least as wide as the drawer when
+        open so the panel is never reshaped.
+      */}
+      <div
+        data-mobile-drawer-clip={open ? "open" : "closed"}
         aria-hidden={!open}
         style={{
           position: "fixed",
@@ -87,24 +105,36 @@ export function MobileSessionDrawer({
           bottom: 0,
           left: 0,
           zIndex: 200,
-          width: "min(85vw, 320px)",
-          display: "flex",
-          flexDirection: "column",
-          background: "var(--bg-panel)",
-          borderRight: "1px solid var(--border)",
-          paddingTop: "env(safe-area-inset-top)",
-          paddingBottom: "env(safe-area-inset-bottom)",
-          paddingLeft: "env(safe-area-inset-left)",
-          transform: open ? "translateX(0)" : "translateX(-101%)",
-          // The load-bearing line: a closed drawer is not hit-testable and is
-          // removed from the a11y tree, so it cannot swallow taps.
-          visibility: open ? "visible" : "hidden",
-          pointerEvents: open ? "auto" : "none",
-          transition: open
-            ? "transform 0.22s ease, visibility 0s"
-            : "transform 0.22s ease, visibility 0s linear 0.22s",
+          width: open ? "min(85vw, 320px)" : 0,
+          overflow: "hidden",
+          pointerEvents: "none",
         }}
       >
+        <aside
+          data-mobile-drawer={open ? "open" : "closed"}
+          aria-hidden={!open}
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: 0,
+            width: "min(85vw, 320px)",
+            display: "flex",
+            flexDirection: "column",
+            background: "var(--bg-panel)",
+            borderRight: "1px solid var(--border)",
+            paddingTop: "env(safe-area-inset-top)",
+            paddingBottom: "env(safe-area-inset-bottom)",
+            paddingLeft: "env(safe-area-inset-left)",
+            // No horizontal translation, so nothing sits left of the viewport.
+            // The clip window above performs the reveal instead.
+            transition: "none",
+            // The load-bearing line: a closed drawer is not hit-testable and is
+            // removed from the a11y tree, so it cannot swallow taps.
+            visibility: open ? "visible" : "hidden",
+            pointerEvents: "none",
+          }}
+        >
         <div
           style={{
             display: "flex",
@@ -271,6 +301,7 @@ export function MobileSessionDrawer({
           })}
         </div>
       </aside>
+      </div>
     </>
   );
 }
