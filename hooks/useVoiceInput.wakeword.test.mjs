@@ -5,32 +5,40 @@ import test from "node:test";
 const voiceInput = await readFile(new URL("./useVoiceInput.ts", import.meta.url), "utf8");
 
 /**
- * Wake word going quiet after the app is backgrounded (F16, re-opened
- * 2026-10-04).
+ * Wake word going quiet after the app is backgrounded (F16).
  *
  * The owner: "Sometimes it responds, sometimes it doesn't. What seems to fix it
  * is enabling and re-enabling the wake word and/or microphone … I think maybe it
  * is lag or response time."
  *
- * That "toggling fixes it" observation is what identified the defect. A toggle
- * changes no threshold — it rebuilds the audio graph. So the failure had to be
- * state lost in the *running* graph. Reading the source found it:
- * `useVoiceInput` handled no `visibilitychange` at all, while iOS suspends an
- * AudioContext on backgrounding. A suspended context fires no
- * `onaudioprocess`, so the rolling buffer froze and the spotter went deaf until
- * something rebuilt the graph.
+ * That "toggling fixes it" observation is what identified the defect: a toggle
+ * changes no threshold, it rebuilds the audio graph, so the failure had to be
+ * state lost in the *running* graph. iOS suspends an AudioContext on
+ * backgrounding, and a suspended context fires no `onaudioprocess`, so the
+ * rolling buffer froze and the spotter went deaf.
+ *
+ * WHAT ACTUALLY FIXES IT — do not confuse these:
+ *   - `useDeadCapture` notices the audio stopped (its frame counter stalls) and
+ *     the pill admits it is not listening.
+ *   - `rebuildCapture` tears down and rebuilds the graph, so one tap restores it.
+ *
+ * WHAT DID NOT FIX IT — kept only as inert mitigation:
+ *   - The `visibilitychange` resume below. It was shipped as the fix (9c4bbbc),
+ *     the owner tested it on device, and the wake word still died. Its tests here
+ *     deliberately assert *hygiene* (it resumes, it cleans up) and NOT that it
+ *     prevents the death, because it does not. An earlier version of this file
+ *     asserted it fixed the problem, which was false.
  *
  * Note what this is NOT: the mute path (purely subtractive, cannot cause it) and
  * the mic-sensitivity slider (feeds the VAD gate, not the spotter threshold) are
- * both ruled out above.
+ * both ruled out.
  */
 
-test("the voice graph resumes its AudioContext when the app returns to the foreground", () => {
-  assert.match(
-    voiceInput,
-    /visibilitychange/,
-    "a suspended AudioContext must be revived on foregrounding, or the wake word dies until a rebuild",
-  );
+test("the foreground handler resumes a suspended AudioContext (hygiene, not a fix)", () => {
+  // Kept because resuming a suspended context is correct on its own terms, and
+  // may reduce how often the context ends up suspended. It is explicitly NOT
+  // claimed to prevent the wake word dying — that was tried and failed.
+  assert.match(voiceInput, /visibilitychange/);
   assert.match(
     voiceInput,
     /visibilityState\s*!==\s*"visible"/,
@@ -46,6 +54,23 @@ test("the foreground handler resumes rather than rebuilding the graph", () => {
   const handler = voiceInput.slice(start, start + 400);
   assert.match(handler, /resume\(\)/, "the handler should resume the existing context");
   assert.doesNotMatch(handler, /getUserMedia/, "must not re-request the microphone");
+});
+
+test("the source says plainly that the resume did not fix the wake word", () => {
+  // A comment claiming a fix that does not exist is worse than no comment: it
+  // stops the next reader looking. This one previously implied the resume was
+  // what recovered the wake word — it is not; detection + rebuild is. Guard the
+  // correction so it cannot quietly revert to the misleading version.
+  assert.match(
+    voiceInput,
+    /WHAT THIS DOES NOT DO/,
+    "the comment must state the limitation, not just the behaviour",
+  );
+  assert.match(
+    voiceInput,
+    /did not|It does not|not load-bearing|failed/i,
+    "it must record that the attempt failed on device",
+  );
 });
 
 test("the visibility listener is removed when the graph is torn down", () => {

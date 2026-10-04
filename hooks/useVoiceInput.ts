@@ -720,14 +720,25 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
         }, KWS_POLL_MS);
 
         // iOS suspends an AudioContext when the app is backgrounded (lock the
-        // phone, switch apps, take a call). A suspended context delivers no
-        // `onaudioprocess` callbacks, so the rolling buffer freezes, the wake
-        // word stops being detected, and nothing here recovers it — the only
-        // thing that did was rebuilding the graph, i.e. the owner's toggle.
+        // phone, switch apps, take a call), and a suspended context delivers no
+        // `onaudioprocess` callbacks — so the rolling buffer freezes and the wake
+        // word stops being detected.
         //
-        // Re-resume on every return to the foreground. `resume()` is
-        // idempotent when already running, so this is safe to call
-        // unconditionally.
+        // WHAT THIS DOES: resumes the context whenever the app returns to the
+        // foreground. `resume()` is idempotent when already running, so calling
+        // it unconditionally is safe.
+        //
+        // WHAT THIS DOES NOT DO: prevent the wake word from dying. This was
+        // shipped (9c4bbbc) as the fix for that, the owner tested it on device,
+        // and it failed — the wake word still stopped responding after
+        // backgrounding. Do not read this block as the reason the wake word
+        // works. The thing that actually handles the death is the pair added
+        // later: `useDeadCapture` notices the audio stopped (frame counter
+        // stalls) and the pill's tap calls `rebuildCapture`, which tears down
+        // and rebuilds the whole graph. This resume is retained as cheap
+        // mitigation — it may reduce how often the context ends up suspended —
+        // but it is not load-bearing, and no test should assert that it fixes
+        // anything.
         const onVisibility = () => {
           if (document.visibilityState !== "visible") return;
           const c = ctxRef.current;

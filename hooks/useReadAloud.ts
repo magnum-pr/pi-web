@@ -436,9 +436,17 @@ export function useReadAloud() {
    * Bound how long `speaking` may remain true.
    *
    * `durationMs` comes from the decoded/loaded audio, so the bound tracks the
-   * real clip. The slack covers decode and output latency. If the end event is
-   * lost — a hardware interruption, an outside pause — this clears the state
-   * anyway and the indicator cannot stick.
+   * real clip. If the end event is lost — a hardware interruption, an outside
+   * pause — this clears the state anyway and the indicator cannot stick.
+   *
+   * VERIFICATION STATUS: the +5000 ms slack is **reasoned, not measured**. It is
+   * meant to cover decode plus output latency on the slowest device we support,
+   * which has not been timed. Too small and a long reply's indicator would clear
+   * early (visually harmless — playback continues; only the label is wrong);
+   * too large and a stuck label lingers longer than it should. Both failure
+   * modes are cosmetic, which is why this is acceptable unmeasured. If it is ever
+   * observed clearing a label mid-reply, raise the slack from a real
+   * measurement, not a guess.
    */
   const armWatchdog = useCallback(
     (durationMs: number) => {
