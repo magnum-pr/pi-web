@@ -2704,8 +2704,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 mode={voiceMode}
                 onModeChange={setVoiceMode}
                 onToggle={() => {
-                  // Clear a latched dead state first so tap is a real retry.
-                  deadCapture.clear();
+                  // A dead capture must be a one-tap REPAIR, not a toggle. The old
+                  // handler called `setEnabled(!enabled)`, so the first tap
+                  // switched voice off and a second tap was needed to bring it
+                  // back — two taps to recover a failure the app had already
+                  // detected and reported.
+                  if (deadCapture.dead) {
+                    deadCapture.clear();
+                    voiceInput.rebuildCapture();
+                    return;
+                  }
                   voiceInput.setEnabled(!voiceInput.enabled);
                 }}
                 onHoldStart={() => {

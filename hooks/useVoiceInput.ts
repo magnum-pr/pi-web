@@ -764,9 +764,27 @@ export function useVoiceInput(onSend: (text: string) => void, armSignal = 0, mic
     };
   }, [enabled, micDeviceId, deviceTick, pollKws, gotoPhase, clearStickyTimer, startRecording, stopAndTranscribe]);
 
+  /**
+   * Rebuild the audio graph without changing the on/off setting.
+   *
+   * This is what a dead capture needs. The pill's tap used to call `setEnabled`
+   * — a *toggle* — so a dead capture was "repaired" by turning voice off, and
+   * the user then had to tap again to turn it back on. Two taps for a failure
+   * the app had already detected.
+   *
+   * Bumping `deviceTick` re-runs the capture effect, which tears the dead
+   * stream and AudioContext down and builds fresh ones. That is exactly what the
+   * manual off/on cycle was doing by accident.
+   */
+  const rebuildCapture = useCallback(() => {
+    setDeviceTick((t) => t + 1);
+  }, []);
+
   return {
     enabled,
     setEnabled,
+    /** Tear down and rebuild the mic + audio graph, keeping voice enabled. */
+    rebuildCapture,
     phase,
     lastDetected,
     error,
