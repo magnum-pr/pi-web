@@ -38,6 +38,71 @@
   `useIsMobile` instead of fighting the pipeline, and leave a note so the rule is
   not re-added. Generalise: any "I wrote the CSS and it did nothing" bug should
   start by proving the rule was emitted at all.
+- **L-006 — A test that greps source can pass by matching a COMMENT.** Three
+  times in one session a new test asserted `assert.match(source, /someCall\(\)/)`
+  and the string being searched for appeared in a doc comment **above** the code,
+  so the assertion succeeded while verifying nothing. Two of them were only
+  exposed when an unrelated refactor moved the real call; the third failed by
+  luck. The failure mode is worse than a normal bug: a broken test fails loudly,
+  a **vacuous** test grants confidence that was never earned, and it is invisible
+  in a green run. Rules that follow: slice from the *body* (`indexOf` the
+  assignment, not the identifier) rather than from the first mention; prefer
+  asserting behaviour over the presence of a particular identifier; and when a
+  test that should pass starts failing after a pure refactor, suspect the test's
+  anchoring before the code. Also: an assertion of *ordering* built from
+  successive `indexOf` calls will silently compare positions in prose.
+- **L-007 — A grep-based orphan/dead-code scan over a TS+Next repo is mostly
+  false positives; do not delete on its output.** A file-orphan heuristic flagged
+  `MessageView`, `atomic-file`, `path-security`, `startup-preferences` and ~50
+  others as unreferenced — **all demonstrably live** — because imports appear as
+  `@/x`, `./x`, `../x` and extensionless forms, and no single pattern sees all of
+  them. The reliable method is to extract every import specifier
+  (`from "..."`, `import("...")`, `require("...")`) from the tree and compare
+  basenames; that found the one genuine candidate. Corollary: an exported symbol
+  with "no references in other files" is usually just used within its own file —
+  count occurrences *in the defining file* before calling it dead. Two removals
+  were safe only because they had exactly one occurrence (the definition).
+- **L-008 — On this codebase, verify the RUNNING BUILD before reporting a defect,
+  including one in your own new code.** A stale `.next` (server start time BEFORE
+  `BUILD_ID` mtime) made a working collapsible section render as permanently
+  expanded, and it was reported to the owner as a bug in the change. It was not:
+  the server was serving a build that predated the change. `AGENTS.md` lists the
+  build/restart ordering trap and L-003 covers the same ground from the testing
+  side; this is the *diagnosis* side of it — **read a surprising result as
+  "which build am I looking at?" before "what is wrong with this code?"**, and
+  compare process start time to `.next/BUILD_ID` mtime first.
+- **L-009 — Fixing a bug and creating one are the same act; budget for it.**
+  Making the read-aloud `<audio>` element shared fixed automatic playback (the
+  gesture unlock now survives) **and** introduced a stuck "Reading…" indicator
+  (the unlock routine called `play()`/`pause()` on the element mid-reply, and a
+  pause never fires `ended`, so nothing cleared the state). Both were real, both
+  shipped, separated by one device round-trip. The pattern to expect: in shared
+  mutable state, every new writer is a new way to desynchronise. When adding a
+  writer to a resource, enumerate the readers that assume exclusivity.
+  Also worth keeping: `AudioBufferSourceNode` has **no** `onerror` (a buffer
+  source cannot fail asynchronously once started — only `play()` on a media
+  element can), so an "error handler" written for one is dead code the linter
+  cannot see; TypeScript caught it.
+- **L-010 — iOS audio: the gesture requirement is lifted PERMANENTLY after the
+  first gesture, and losing the unlock is an application bug.** WebKit's
+  `HTMLMediaElement::removeBehaviorRestrictionsAfterFirstUserGesture()` runs once
+  and the restriction does not return. "Autoplay is blocked on iOS" is therefore
+  the wrong mental model — the correct one is "autoplay is blocked until the page
+  has been interacted with". Concretely: take the unlock deliberately on the first
+  tap anywhere (a one-sample buffer at zero gain completes it silently), and
+  **reuse one media element** — a freshly constructed `Audio`/`AudioContext` is
+  unproven again, so building one per playback throws the unlock away. Symptom of
+  getting this wrong is distinctive and worth recognising: **automatic playback
+  fails while the same content plays fine when tapped manually.**
+- **L-011 — "Detection without recovery" is half a fix, and the owner will
+  notice.** Making a dead microphone visible was correct work, but the repair was
+  left as a manual tap — and the tap was wired as a *toggle*, so recovering cost
+  two taps for a failure the app had already detected. When a system can detect
+  its own failure, it should repair itself or repair in one action; asking the
+  user to perform a repair the app could perform is a usability defect even when
+  the diagnosis is right. Same shape as the real fix here: an existing lever
+  already forced a rebuild (`deviceTick`), so the "repair" was reusing it rather
+  than toggling power.
 - **L-005 — Building wipes `.next/`, which a running production server serves
   from.** The server keeps responding from memory and its log stays clean, but it
   then serves chunks that no longer match the replaced build — the mobile shell
