@@ -159,6 +159,80 @@ test("there is no retry button in the UI", () => {
   });
 });
 
+/**
+ * Stuck "Reading…" indicator (owner, on device 2026-10-04).
+ *
+ * "the CTA underneath all the conversations will still show reading all the
+ * time even after the agent has finished reading."
+ *
+ * Two causes, both introduced by making the audio element shared:
+ *
+ *  1. `unlockAudio` primed the shared element with play()/pause() on every
+ *     first gesture. Arriving mid-reply, that PAUSED the reply — and a pause
+ *     never fires `ended`, so `speakingText` was never cleared.
+ *  2. Clearing state depends on `ended` firing, which is not guaranteed: an
+ *     interruption produces `pause`. Nothing bounded how long `speaking` could
+ *     stay true.
+ */
+
+test("priming the shared element never interrupts playback in progress", () => {
+  const start = readAloud.indexOf("const unlockAudio");
+  const body = readAloud.slice(start, readAloud.indexOf("const loadVoices", start));
+  const prime = body.slice(body.indexOf("ensureAudioElement()"));
+  assert.match(
+    prime,
+    /!speakingRef\.current/,
+    "priming must be skipped while a reply is playing through that same element",
+  );
+});
+
+test("`speaking` is bounded, so the indicator cannot stick indefinitely", () => {
+  assert.match(readAloud, /armWatchdog/, "a watchdog is what makes the stuck state impossible");
+  assert.match(readAloud, /watchdogRef/, "…backed by a timer ref");
+});
+
+test("the watchdog is derived from the audio duration, not a fixed guess", () => {
+  // A fixed timeout would cut long replies short. The bound must track the clip.
+  assert.match(readAloud, /armWatchdog\(audioBuffer\.duration/, "context path uses the decoded duration");
+  assert.match(readAloud, /armWatchdog\(el\.duration/, "element path uses the media duration");
+});
+
+test("normal completion clears the watchdog rather than letting it fire later", () => {
+  // Otherwise a finished reply leaves a pending timer that would clear the
+  // state of the NEXT reply, mid-playback.
+  //
+  // Search from the assignment, not the first mention: `src.onended` also
+  // appears in a doc comment earlier in the file, and anchoring on the prose
+  // made this test inspect a comment instead of the handler.
+  const contextAnchor = readAloud.indexOf("src.onended = () =>");
+  assert.ok(contextAnchor > -1, "expected the context end handler");
+  const contextEnd = readAloud.slice(contextAnchor, contextAnchor + 300);
+  assert.match(contextEnd, /clearWatchdog\(\)/, "the context path must disarm on end");
+
+  const elAnchor = readAloud.indexOf("el.onended = () =>");
+  assert.ok(elAnchor > -1, "expected the element end handler");
+  const elEnd = readAloud.slice(elAnchor, elAnchor + 200);
+  assert.match(elEnd, /clearWatchdog\(\)/, "the element path must disarm on end");
+});
+
+test("stopping and failing both disarm the watchdog", () => {
+  const stopBody = readAloud.slice(
+    readAloud.indexOf("const stop = useCallback"),
+    readAloud.indexOf("const stop = useCallback") + 400,
+  );
+  assert.match(stopBody, /clearWatchdog\(\)/, "stop must disarm");
+  const failBody = readAloud.slice(readAloud.indexOf("const fail ="), readAloud.indexOf("const fail =") + 200);
+  assert.match(failBody, /clearWatchdog\(\)/, "a failure must disarm");
+});
+
+test("the watchdog only clears state it still owns", () => {
+  // If playback already ended, firing must be a no-op — otherwise it could
+  // wipe the state of a reply that started after the timer was armed.
+  const body = readAloud.slice(readAloud.indexOf("const armWatchdog"));
+  const timer = body.slice(0, body.indexOf("const loadVoices"));
+  assert.match(timer, /if \(!speakingRef\.current\) return/, "fire only while still speaking");
+});
+
 test("the element's error event does not overwrite a more specific failure", () => {
   // Observed on device: the retry button was present (stage === blocked) while
   // the message read "Audio playback failed". The element's `onerror` fires

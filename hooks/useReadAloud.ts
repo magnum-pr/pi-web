@@ -211,6 +211,25 @@ export function useReadAloud() {
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const speakingRef = useRef(false);
   const speakingTextRef = useRef<string | null>(null);
+  /**
+   * Safety net for the stuck "Reading…" indicator.
+   *
+   * Clearing `speaking` depends on `onended` firing. That is not guaranteed: an
+   * interruption (a call, another app claiming the audio session, the element
+   * being paused by something outside this hook) produces `pause`, never
+   * `ended`. Without a bound, the message button would stay on "Reading…"
+   * indefinitely — which is the bug the owner reported.
+   *
+   * The watchdog is derived from the audio's own duration rather than a fixed
+   * guess, so a long reply is not cut short.
+   */
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearWatchdog = useCallback(() => {
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+  }, []);
 
   /** The reusable playback element, created once. */
   const ensureAudioElement = useCallback((): HTMLAudioElement | null => {
@@ -290,10 +309,17 @@ export function useReadAloud() {
         // Non-fatal: playback may still succeed from a later gesture.
       }
     }
-    // Prime the reusable element too — a brand-new element has to earn the
-    // restriction removal again on some paths.
+    // Prime the reusable element too, so the gesture is recorded against the
+    // element that will actually play replies.
+    //
+    // The guard is load-bearing. This element is now shared with playback, and
+    // an earlier version called play()/pause() unconditionally here — so a
+    // gesture arriving mid-reply PAUSED the reply. Because that path pauses
+    // rather than ending, `onended` never fired and `speakingText` was never
+    // cleared, leaving the message button stuck on "Reading…" forever.
+    // Never touch the element while something is playing through it.
     const el = ensureAudioElement();
-    if (el) {
+    if (el && !speakingRef.current) {
       try {
         el.play().then(
           () => {
@@ -355,6 +381,7 @@ export function useReadAloud() {
   }, [unlockAudio]);
 
   const stop = useCallback(() => {
+    clearWatchdog();
     if (sourceRef.current) {
       try {
         sourceRef.current.stop();
@@ -376,7 +403,31 @@ export function useReadAloud() {
     speakingTextRef.current = null;
     setSpeaking(false);
     setSpeakingText(null);
-  }, []);
+  }, [clearWatchdog]);
+
+  /**
+   * Bound how long `speaking` may remain true.
+   *
+   * `durationMs` comes from the decoded/loaded audio, so the bound tracks the
+   * real clip. The slack covers decode and output latency. If the end event is
+   * lost — a hardware interruption, an outside pause — this clears the state
+   * anyway and the indicator cannot stick.
+   */
+  const armWatchdog = useCallback(
+    (durationMs: number) => {
+      clearWatchdog();
+      if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+      watchdogRef.current = setTimeout(() => {
+        watchdogRef.current = null;
+        if (!speakingRef.current) return; // already finished normally
+        speakingRef.current = false;
+        speakingTextRef.current = null;
+        setSpeaking(false);
+        setSpeakingText(null);
+      }, durationMs + 5000);
+    },
+    [clearWatchdog],
+  );
 
   /**
    * Play decoded audio through the AudioContext, pinned to the chosen sink.
@@ -421,6 +472,7 @@ export function useReadAloud() {
     src.connect(ctx.destination);
     src.onended = () => {
       if (sourceRef.current === src) sourceRef.current = null;
+      clearWatchdog();
       speakingRef.current = false;
       speakingTextRef.current = null;
       setSpeaking(false);
@@ -433,12 +485,14 @@ export function useReadAloud() {
     sourceRef.current = src;
     try {
       src.start();
+      // Bound the state in case the end event never arrives.
+      armWatchdog(audioBuffer.duration * 1000);
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
       sourceRef.current = null;
       throw new Error(`Playback failed: could not start playback (${detail})`);
     }
-  }, [getCtx]);
+  }, [getCtx, armWatchdog, clearWatchdog]);
 
   /**
    * Playback via an <audio> element — used when only
@@ -475,6 +529,7 @@ export function useReadAloud() {
     el.onended = () => {
       ended = true;
       settled = true;
+      clearWatchdog();
       finish();
     };
     el.onerror = () => {
@@ -485,6 +540,8 @@ export function useReadAloud() {
     };
     el.src = url;
     el.load();
+    // Bound the state in case the end event never arrives.
+    el.onloadedmetadata = () => armWatchdog(el.duration * 1000);
     // This path is only taken when HTMLMediaElement.setSinkId exists.
     await applySink(sinkTargetRef.current, el.setSinkId.bind(el));
     try {
@@ -513,7 +570,7 @@ export function useReadAloud() {
       // playback() resolved but the element never reported an end, which means
       // it was accepted and is playing. Nothing further to do here.
     }
-  }, [ensureAudioElement]);
+  }, [ensureAudioElement, armWatchdog, clearWatchdog]);
 
   const speak = useCallback(async (text: string) => {
     const trimmed = text.trim();
@@ -526,6 +583,7 @@ export function useReadAloud() {
     setSpeakingText(trimmed);
 
     const fail = (message: string, stage: ReadAloudFailure["stage"]) => {
+      clearWatchdog();
       speakingRef.current = false;
       speakingTextRef.current = null;
       setSpeaking(false);
@@ -568,7 +626,7 @@ export function useReadAloud() {
       // read failed so it can still re-arm the voice follow-up window.
       throw e instanceof Error ? e : new Error(message);
     }
-  }, [voice, stop, playViaContext, playViaElement]);
+  }, [voice, stop, playViaContext, playViaElement, clearWatchdog]);
 
   // Let `unlockAudio` replay a refused reply without depending on `speak`
   // (which would be a cycle: speak → unlock → speak). Assigned in an effect
