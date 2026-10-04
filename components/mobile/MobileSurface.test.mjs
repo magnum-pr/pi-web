@@ -51,6 +51,51 @@ test("the closed drawer is inert, not merely translated (guards the dead-click d
   assert.match(drawerSource, /data-mobile-drawer-backdrop/);
 });
 
+test("no drawer element hardcodes pointer-events: none", () => {
+  // REGRESSION GUARD (owner-reported 2026-10-04: "I hit the button but then it
+  // just closes the left side drawer").
+  //
+  // The previous test above passed the whole time this bug was live, because it
+  // only asserted that the *pattern* `open ? "auto" : "none"` appears SOMEWHERE
+  // in the file — and it does, on the backdrop. Meanwhile the clip window and the
+  // <aside> hardcoded `pointerEvents: "none"`, so every button inside the drawer
+  // was unclickable: taps fell through to the shell header underneath, whose
+  // handler closed the drawer.
+  //
+  // This is the GL-021 failure mode in its purest form: the assertion checked
+  // that a string existed, not that the interactive elements were interactive.
+  //
+  // A closed drawer must be inert, but that MUST be expressed conditionally. A
+  // literal `none` on a container is never correct.
+  const hardcoded = [...drawerSource.matchAll(/pointerEvents:\s*"none"/g)];
+  assert.equal(
+    hardcoded.length,
+    0,
+    `found ${hardcoded.length} hardcoded pointerEvents: "none" — a container that holds buttons must use open ? "auto" : "none"`,
+  );
+});
+
+test("every element that holds drawer controls becomes interactive when open", () => {
+  // The structural version of the guard above: count conditional pointerEvents
+  // rather than literals. The drawer has two interactive layers (the clip window
+  // and the aside); both must gate on `open`.
+  const conditional = [...drawerSource.matchAll(/pointerEvents:\s*open\s*\?\s*"auto"\s*:\s*"none"/g)];
+  assert.ok(
+    conditional.length >= 3,
+    `expected the backdrop AND both drawer layers to gate on open, found ${conditional.length}`,
+  );
+});
+
+test("the new-chat control is reachable (its handler must not be pre-empted by a parent)", () => {
+  // The specific symptom: pressing "+ New" did nothing and closed the drawer.
+  // The button exists and has a handler; the failure was pointer-events on an
+  // ancestor. Assert the control is a real button that reports its expanded
+  // state, so a future refactor cannot quietly unmake it.
+  assert.match(drawerSource, /data-mobile-new-chat="true"/);
+  assert.match(drawerSource, /aria-expanded=\{newChatOpen\}/);
+  assert.match(drawerSource, /data-mobile-project-list/);
+});
+
 test("drawer rows are real buttons with a 44pt minimum touch target", () => {
   assert.match(drawerSource, /<button/);
   assert.match(drawerSource, /minHeight:\s*56/);

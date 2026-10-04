@@ -107,7 +107,14 @@ export function MobileSessionDrawer({
           zIndex: 200,
           width: open ? "min(85vw, 320px)" : 0,
           overflow: "hidden",
-          pointerEvents: "none",
+          // MUST be conditional. A hardcoded `none` here makes every control in
+          // the drawer unclickable: taps fall through to the shell header
+          // underneath, which closes the drawer. That is exactly the reported
+          // bug ("I hit the button but then it just closes the left side
+          // drawer"), introduced when the offscreen-parking change rewrote this
+          // block. The closed state still needs to be inert — hence the
+          // conditional, not a literal.
+          pointerEvents: open ? "auto" : "none",
         }}
       >
         <aside
@@ -130,9 +137,11 @@ export function MobileSessionDrawer({
             // The clip window above performs the reveal instead.
             transition: "none",
             // The load-bearing line: a closed drawer is not hit-testable and is
-            // removed from the a11y tree, so it cannot swallow taps.
+            // removed from the a11y tree, so it cannot swallow taps. Conditional
+            // for the same reason as the clip window above — a literal `none`
+            // disables the drawer's own buttons while it is open.
             visibility: open ? "visible" : "hidden",
-            pointerEvents: "none",
+            pointerEvents: open ? "auto" : "none",
           }}
         >
         <div
