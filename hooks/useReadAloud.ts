@@ -207,6 +207,8 @@ export function useReadAloud() {
   const blockedTextRef = useRef<string | null>(null);
   /** Set once `speak` exists, so `unlockAudio` can replay without a cycle. */
   const replayRef = useRef<(() => void) | null>(null);
+  /** Pending deferred replay, cleared on unmount. */
+  const replayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const speakingRef = useRef(false);
@@ -356,10 +358,22 @@ export function useReadAloud() {
     if (blockedTextRef.current) {
       blockedTextRef.current = null;
       // Deferred a tick so the unlock is committed by the engine before
-      // playback is attempted.
-      setTimeout(() => replayRef.current?.(), 0);
+      // playback is attempted. Tracked so it cannot fire after unmount.
+      const t = setTimeout(() => {
+        replayTimeoutRef.current = null;
+        replayRef.current?.();
+      }, 0);
+      replayTimeoutRef.current = t;
     }
   }, [getCtx, ensureAudioElement]);
+
+  // Clear the deferred replay on unmount so it cannot run against a dead tree.
+  useEffect(() => {
+    return () => {
+      if (replayTimeoutRef.current) clearTimeout(replayTimeoutRef.current);
+      replayTimeoutRef.current = null;
+    };
+  }, []);
 
   const loadVoices = useCallback(async () => {
     try {

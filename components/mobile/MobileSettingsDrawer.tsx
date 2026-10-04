@@ -823,9 +823,3 @@ export function MobileSettingsDrawer({
     </>
   );
 }
-
-/** Open/close state for the settings drawer, owned by the composer. */
-export function useMobileSettings() {
-  const [open, setOpen] = useState(false);
-  return { open, setOpen };
-}

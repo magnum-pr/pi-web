@@ -327,13 +327,6 @@ export async function ensureWhisperServer(): Promise<WhisperStatus> {
   return statusFrom(state, models);
 }
 
-/** Current status without spawning. */
-export function getWhisperStatus(): WhisperStatus {
-  const state = ensureState();
-  const models = listWhisperModels(state.config.modelDir);
-  return statusFrom(state, models);
-}
-
 /** Persist the chosen model and restart the server on it. */
 export async function switchWhisperModel(requested: unknown): Promise<WhisperStatus> {
   const state = ensureState();
