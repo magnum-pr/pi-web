@@ -231,6 +231,22 @@ export function useReadAloud() {
     }
   }, []);
 
+  /**
+   * The single place `speaking` is turned off.
+   *
+   * This was previously four lines copy-pasted into five call sites, and the
+   * copies are what caused the stuck "Reading…" indicator: one path cleared the
+   * refs and the state inconsistently, so the UI kept claiming to read while
+   * the refs said otherwise. Anything that ends playback calls this.
+   */
+  const clearSpeakingState = useCallback(() => {
+    clearWatchdog();
+    speakingRef.current = false;
+    speakingTextRef.current = null;
+    setSpeaking(false);
+    setSpeakingText(null);
+  }, [clearWatchdog]);
+
   /** The reusable playback element, created once. */
   const ensureAudioElement = useCallback((): HTMLAudioElement | null => {
     if (typeof window === "undefined") return null;
@@ -399,11 +415,8 @@ export function useReadAloud() {
       }
       audioElRef.current = null;
     }
-    speakingRef.current = false;
-    speakingTextRef.current = null;
-    setSpeaking(false);
-    setSpeakingText(null);
-  }, [clearWatchdog]);
+    clearSpeakingState();
+  }, [clearSpeakingState, clearWatchdog]);
 
   /**
    * Bound how long `speaking` may remain true.
@@ -420,13 +433,10 @@ export function useReadAloud() {
       watchdogRef.current = setTimeout(() => {
         watchdogRef.current = null;
         if (!speakingRef.current) return; // already finished normally
-        speakingRef.current = false;
-        speakingTextRef.current = null;
-        setSpeaking(false);
-        setSpeakingText(null);
+        clearSpeakingState();
       }, durationMs + 5000);
     },
-    [clearWatchdog],
+    [clearSpeakingState, clearWatchdog],
   );
 
   /**
@@ -472,11 +482,7 @@ export function useReadAloud() {
     src.connect(ctx.destination);
     src.onended = () => {
       if (sourceRef.current === src) sourceRef.current = null;
-      clearWatchdog();
-      speakingRef.current = false;
-      speakingTextRef.current = null;
-      setSpeaking(false);
-      setSpeakingText(null);
+      clearSpeakingState();
     };
     // NOTE: AudioBufferSourceNode has no `onerror` — unlike <audio>, a buffer
     // source cannot fail asynchronously once started. Start-time failures are
@@ -492,7 +498,7 @@ export function useReadAloud() {
       sourceRef.current = null;
       throw new Error(`Playback failed: could not start playback (${detail})`);
     }
-  }, [getCtx, armWatchdog, clearWatchdog]);
+  }, [getCtx, armWatchdog, clearSpeakingState]);
 
   /**
    * Playback via an <audio> element — used when only
@@ -521,15 +527,14 @@ export function useReadAloud() {
     const finish = () => {
       URL.revokeObjectURL(url);
       if (audioElRef.current === el) audioElRef.current = null;
-      speakingRef.current = false;
-      speakingTextRef.current = null;
-      setSpeaking(false);
-      setSpeakingText(null);
+      clearSpeakingState();
     };
     el.onended = () => {
       ended = true;
       settled = true;
-      clearWatchdog();
+      // `finish` already tears the state down (and disarms the watchdog), so
+      // there is deliberately no second cleanup call here — duplicated cleanup
+      // is what let the indicator drift out of sync before.
       finish();
     };
     el.onerror = () => {
@@ -570,7 +575,7 @@ export function useReadAloud() {
       // playback() resolved but the element never reported an end, which means
       // it was accepted and is playing. Nothing further to do here.
     }
-  }, [ensureAudioElement, armWatchdog, clearWatchdog]);
+  }, [ensureAudioElement, armWatchdog, clearSpeakingState]);
 
   const speak = useCallback(async (text: string) => {
     const trimmed = text.trim();
@@ -583,11 +588,7 @@ export function useReadAloud() {
     setSpeakingText(trimmed);
 
     const fail = (message: string, stage: ReadAloudFailure["stage"]) => {
-      clearWatchdog();
-      speakingRef.current = false;
-      speakingTextRef.current = null;
-      setSpeaking(false);
-      setSpeakingText(null);
+      clearSpeakingState();
       setError(message);
       setLastFailure({
         message,
@@ -626,7 +627,7 @@ export function useReadAloud() {
       // read failed so it can still re-arm the voice follow-up window.
       throw e instanceof Error ? e : new Error(message);
     }
-  }, [voice, stop, playViaContext, playViaElement, clearWatchdog]);
+  }, [voice, stop, playViaContext, playViaElement, clearSpeakingState]);
 
   // Let `unlockAudio` replay a refused reply without depending on `speak`
   // (which would be a cycle: speak → unlock → speak). Assigned in an effect

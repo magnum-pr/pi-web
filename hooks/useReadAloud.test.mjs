@@ -201,28 +201,52 @@ test("normal completion clears the watchdog rather than letting it fire later", 
   // Otherwise a finished reply leaves a pending timer that would clear the
   // state of the NEXT reply, mid-playback.
   //
-  // Search from the assignment, not the first mention: `src.onended` also
-  // appears in a doc comment earlier in the file, and anchoring on the prose
-  // made this test inspect a comment instead of the handler.
+  // Asserted against `clearSpeakingState` rather than the literal
+  // `clearWatchdog()` call: that helper is the single place playback state is
+  // torn down (and it disarms the watchdog itself), so pinning the helper keeps
+  // this test about behaviour instead of about which function name is spelled
+  // where. It was four duplicated blocks before, and the duplication is what
+  // produced the stuck "Reading…" label.
+  //
+  // Search from the assignment, not the first mention: the identifier also
+  // appears in doc comments earlier in the file.
   const contextAnchor = readAloud.indexOf("src.onended = () =>");
   assert.ok(contextAnchor > -1, "expected the context end handler");
   const contextEnd = readAloud.slice(contextAnchor, contextAnchor + 300);
-  assert.match(contextEnd, /clearWatchdog\(\)/, "the context path must disarm on end");
+  assert.match(contextEnd, /clearSpeakingState\(\)/, "the context path must tear down on end");
 
   const elAnchor = readAloud.indexOf("el.onended = () =>");
   assert.ok(elAnchor > -1, "expected the element end handler");
-  const elEnd = readAloud.slice(elAnchor, elAnchor + 200);
-  assert.match(elEnd, /clearWatchdog\(\)/, "the element path must disarm on end");
+  const elEnd = readAloud.slice(elAnchor, elAnchor + 300);
+  // The element path tears down via `finish`, which is the one place that
+  // clears playback state — so assert it routes there rather than inlining a
+  // second copy of the cleanup.
+  assert.match(elEnd, /finish\(\)/, "the element path must tear down on end");
 });
 
-test("stopping and failing both disarm the watchdog", () => {
-  const stopBody = readAloud.slice(
-    readAloud.indexOf("const stop = useCallback"),
-    readAloud.indexOf("const stop = useCallback") + 400,
+test("stopping and failing both tear down the playback state", () => {
+  const stopAnchor = readAloud.indexOf("const stop = useCallback");
+  assert.ok(stopAnchor > -1, "expected stop()");
+  const stopBody = readAloud.slice(stopAnchor, stopAnchor + 500);
+  assert.match(stopBody, /clearSpeakingState\(\)|clearWatchdog\(\)/, "stop must tear down");
+
+  const failAnchor = readAloud.indexOf("const fail =");
+  assert.ok(failAnchor > -1, "expected the fail helper");
+  const failBody = readAloud.slice(failAnchor, failAnchor + 300);
+  assert.match(failBody, /clearSpeakingState\(\)|clearWatchdog\(\)/, "a failure must tear down");
+});
+
+test("playback state is torn down in exactly one place", () => {
+  // The guard on the cleanup itself. Five copy-pasted four-line blocks is what
+  // let one path clear the refs without clearing the state, which is how the
+  // button stuck on "Reading…". One helper, or the copies drift again.
+  assert.match(readAloud, /const clearSpeakingState = useCallback/, "the helper must exist");
+  const directWrites = (readAloud.match(/speakingTextRef\.current = null/g) ?? []).length;
+  assert.equal(
+    directWrites,
+    1,
+    `playback state must be cleared in one place, found ${directWrites} — duplicated cleanup drifts`,
   );
-  assert.match(stopBody, /clearWatchdog\(\)/, "stop must disarm");
-  const failBody = readAloud.slice(readAloud.indexOf("const fail ="), readAloud.indexOf("const fail =") + 200);
-  assert.match(failBody, /clearWatchdog\(\)/, "a failure must disarm");
 });
 
 test("the watchdog only clears state it still owns", () => {
