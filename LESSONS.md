@@ -38,19 +38,11 @@
   `useIsMobile` instead of fighting the pipeline, and leave a note so the rule is
   not re-added. Generalise: any "I wrote the CSS and it did nothing" bug should
   start by proving the rule was emitted at all.
-- **L-006 — A test that greps source can pass by matching a COMMENT.** Three
-  times in one session a new test asserted `assert.match(source, /someCall\(\)/)`
-  and the string being searched for appeared in a doc comment **above** the code,
-  so the assertion succeeded while verifying nothing. Two of them were only
-  exposed when an unrelated refactor moved the real call; the third failed by
-  luck. The failure mode is worse than a normal bug: a broken test fails loudly,
-  a **vacuous** test grants confidence that was never earned, and it is invisible
-  in a green run. Rules that follow: slice from the *body* (`indexOf` the
-  assignment, not the identifier) rather than from the first mention; prefer
-  asserting behaviour over the presence of a particular identifier; and when a
-  test that should pass starts failing after a pure refactor, suspect the test's
-  anchoring before the code. Also: an assertion of *ordering* built from
-  successive `indexOf` calls will silently compare positions in prose.
+- **L-006 — A test that greps source can pass by matching a COMMENT.** See
+  **GL-021** (global): the reasoning failure and the rules are recorded there.
+  Project-specific outcome: three test assertions in this repo were found
+  vacuous for exactly this reason, in `hooks/useReadAloud.test.mjs` and
+  `hooks/useDeadCapture.test.mjs`.
 - **L-007 — A grep-based orphan/dead-code scan over a TS+Next repo is mostly
   false positives; do not delete on its output.** A file-orphan heuristic flagged
   `MessageView`, `atomic-file`, `path-security`, `startup-preferences` and ~50
@@ -62,27 +54,12 @@
   with "no references in other files" is usually just used within its own file —
   count occurrences *in the defining file* before calling it dead. Two removals
   were safe only because they had exactly one occurrence (the definition).
-- **L-008 — On this codebase, verify the RUNNING BUILD before reporting a defect,
-  including one in your own new code.** A stale `.next` (server start time BEFORE
-  `BUILD_ID` mtime) made a working collapsible section render as permanently
-  expanded, and it was reported to the owner as a bug in the change. It was not:
-  the server was serving a build that predated the change. `AGENTS.md` lists the
-  build/restart ordering trap and L-003 covers the same ground from the testing
-  side; this is the *diagnosis* side of it — **read a surprising result as
-  "which build am I looking at?" before "what is wrong with this code?"**, and
-  compare process start time to `.next/BUILD_ID` mtime first.
-- **L-009 — Fixing a bug and creating one are the same act; budget for it.**
-  Making the read-aloud `<audio>` element shared fixed automatic playback (the
-  gesture unlock now survives) **and** introduced a stuck "Reading…" indicator
-  (the unlock routine called `play()`/`pause()` on the element mid-reply, and a
-  pause never fires `ended`, so nothing cleared the state). Both were real, both
-  shipped, separated by one device round-trip. The pattern to expect: in shared
-  mutable state, every new writer is a new way to desynchronise. When adding a
-  writer to a resource, enumerate the readers that assume exclusivity.
-  Also worth keeping: `AudioBufferSourceNode` has **no** `onerror` (a buffer
-  source cannot fail asynchronously once started — only `play()` on a media
-  element can), so an "error handler" written for one is dead code the linter
-  cannot see; TypeScript caught it.
+- **L-008 — Verify the RUNNING BUILD before reporting a defect, including in your
+  own new code.** See **GL-023** (global) for the general form. Project detail:
+  check process start time against `.next/BUILD_ID` mtime; a stale `.next` made a
+  working collapsible section render as permanently expanded and it was reported
+  as a bug in the change. `AGENTS.md` lists the build/restart ordering trap and
+  L-003 covers the testing side; this is the *diagnosis* side.
 - **L-010 — iOS audio: the gesture requirement is lifted PERMANENTLY after the
   first gesture, and losing the unlock is an application bug.** WebKit's
   `HTMLMediaElement::removeBehaviorRestrictionsAfterFirstUserGesture()` runs once
@@ -94,15 +71,12 @@
   unproven again, so building one per playback throws the unlock away. Symptom of
   getting this wrong is distinctive and worth recognising: **automatic playback
   fails while the same content plays fine when tapped manually.**
-- **L-011 — "Detection without recovery" is half a fix, and the owner will
-  notice.** Making a dead microphone visible was correct work, but the repair was
-  left as a manual tap — and the tap was wired as a *toggle*, so recovering cost
-  two taps for a failure the app had already detected. When a system can detect
-  its own failure, it should repair itself or repair in one action; asking the
-  user to perform a repair the app could perform is a usability defect even when
-  the diagnosis is right. Same shape as the real fix here: an existing lever
-  already forced a rebuild (`deviceTick`), so the "repair" was reusing it rather
-  than toggling power.
+- **L-012 — `AudioBufferSourceNode` has no `onerror`.** A buffer source cannot
+  fail asynchronously once started, unlike a media element — only `play()` on an
+  `HTMLMediaElement` rejects. An "error handler" written for a buffer source is
+  dead code no linter will flag; TypeScript catches it as a missing property,
+  which is how it was found. Attach error handling to `play()`/`decodeAudioData`
+  instead.
 - **L-005 — Building wipes `.next/`, which a running production server serves
   from.** The server keeps responding from memory and its log stays clean, but it
   then serves chunks that no longer match the replaced build — the mobile shell
@@ -110,3 +84,23 @@
   restart promptly; never leave a server running against a `.next/` that has been
   rebuilt underneath it. A scratch server on a second port is the safe way to
   verify a build while the live one keeps serving.
+
+## Promoted out of this file
+
+These were written here first and then generalised, because the underlying
+reasoning failure was not PiWeb-specific. The project-specific detail is gone
+from this file deliberately — keep new entries here only if they would be
+*wrong* somewhere else.
+
+| Was | Now |
+|---|---|
+| L-009 — fixing and breaking are the same act in shared state | **GL-024** |
+| L-011 — detection without recovery is half a fix | **GL-025** |
+
+The numbering gap (no L-009 / L-011) is intentional and not a deleted lesson.
+
+Also promoted, originally written here before being generalised:
+L-006 → **GL-021** (a test can pass by matching a comment),
+L-008 → **GL-023** (ask which build you are looking at).
+L-007 (orphan-scan false positives) and L-010 / L-012 (iOS audio internals)
+stay local — they are only correct in this stack.
