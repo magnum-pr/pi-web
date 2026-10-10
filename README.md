@@ -14,6 +14,7 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
 - **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
+- **Mobile surface**: a separate phone/tablet UI at `/m` with its own drawer, touch-sized controls, and a settings drawer — see [Mobile](#mobile).
 - **Offline voice dictation**: transcribe speech locally with whisper.cpp — see [Dictation](#dictation).
 
 ## Quick Start
@@ -89,6 +90,14 @@ $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
 npx @agegr/pi-web@latest
 ```
+
+## Mobile
+
+Pi Web serves two UI trees over one backend: the desktop app at `/` and the mobile app at `/m`. Phones and tablets are redirected to `/m` by user agent, and the web app manifest's `start_url` is `/m`, so installing Pi Web to the home screen opens the mobile shell directly.
+
+The mobile surface is a separate component tree, not a responsive restyle. It replaces the sidebar and panels with a left-edge session drawer and a ⚙ settings drawer (Model / Audio / Voice / Advanced), and it hides desktop-only chrome such as the cost bar and minimap. Everything below the UI is shared — same API routes, same auth, same session files, same chat and voice hooks.
+
+Full setup — hub preparation, private exposure, PWA install, and the voice stack — is in [Pi Web on your phone](./docs/mobile-setup.md).
 
 ## Dictation
 
